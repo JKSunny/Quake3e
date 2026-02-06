@@ -61,7 +61,8 @@
 
 #define VK_DESC_UNIFORM_MAIN_BINDING		0
 #define VK_DESC_UNIFORM_CAMERA_BINDING		1
-#define VK_DESC_UNIFORM_COUNT				2
+#define VK_DESC_UNIFORM_GLOBAL_BINDING		2
+#define VK_DESC_UNIFORM_COUNT				3
 
 typedef enum {
 	TYPE_COLOR_BLACK,
@@ -239,6 +240,11 @@ typedef struct vkUniform_s {
 	vec4_t fogEyeT;				// vertex
 	vec4_t fogColor;			// fragment
 } vkUniform_t;
+
+typedef struct vkUniformGlobal_s {
+	vec4_t				specularScale;	
+	vec4_t				normalScale;	
+} vkUniformGlobal_t;
 
 typedef struct vkUniformCamera_s {
 	vec4_t viewOrigin;
@@ -588,6 +594,7 @@ typedef struct {
 
 	uint32_t uniform_item_size;
 	uint32_t uniform_camera_item_size;
+	uint32_t uniform_global_item_size;
 	uint32_t uniform_alignment;
 	uint32_t storage_alignment;
 

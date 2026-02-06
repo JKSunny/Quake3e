@@ -2345,28 +2345,34 @@ static VkShaderModule SHADER_MODULE(const uint8_t *bytes, const int count) {
 	return module;
 }
 
-
-static void vk_create_layout_binding( int binding, VkDescriptorType type, VkShaderStageFlags flags, VkDescriptorSetLayout *layout )
+static void vk_push_layout_binding( VkDescriptorSetLayoutBinding *bind, VkDescriptorType type,
+    uint32_t binding,VkShaderStageFlags flags ) 
 {
-	uint32_t count = 0;
-	VkDescriptorSetLayoutBinding bind[2];
+    bind[binding].binding = binding;
+    bind[binding].descriptorType = type;
+    bind[binding].descriptorCount = 1;
+    bind[binding].stageFlags = flags;
+    bind[binding].pImmutableSamplers = NULL;
+}
+
+static void vk_create_layout_binding( int binding, VkDescriptorType type, 
+	VkShaderStageFlags flags, VkDescriptorSetLayout *layout, qboolean is_uniform )
+{
+	uint32_t count = 1;
+	VkDescriptorSetLayoutBinding bind[VK_DESC_UNIFORM_COUNT];
 	VkDescriptorSetLayoutCreateInfo desc;
 
-	bind[count].binding = binding;
-	bind[count].descriptorType = type;
-	bind[count].descriptorCount = 1;
-	bind[count].stageFlags = flags;
-	bind[count].pImmutableSamplers = NULL;
-	count++;
+	vk_push_layout_binding( bind, type, binding, flags );
 
-	if ( *layout == vk.set_layout_uniform ) {
-		bind[count].binding = VK_DESC_UNIFORM_CAMERA_BINDING;
-		bind[count].descriptorType = type;
-		bind[count].descriptorCount = 1;
-		bind[count].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-		bind[count].pImmutableSamplers = NULL;
-		count++;    
+#ifdef USE_VK_PBR
+	if ( is_uniform ) {
+		const VkShaderStageFlags uniform_flags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+		vk_push_layout_binding( bind, type, VK_DESC_UNIFORM_CAMERA_BINDING, VK_SHADER_STAGE_VERTEX_BIT );
+		vk_push_layout_binding( bind, type, VK_DESC_UNIFORM_GLOBAL_BINDING, uniform_flags );
+
+		count = VK_DESC_UNIFORM_COUNT;    
 	}
+#endif
 
 	desc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
 	desc.pNext = NULL;
@@ -2403,6 +2409,7 @@ void vk_update_uniform_descriptor( VkDescriptorSet descriptor, VkBuffer buffer )
 
 	vk_write_uniform_descriptor( desc, info, buffer, descriptor, VK_DESC_UNIFORM_MAIN_BINDING, sizeof(vkUniform_t) );
 	vk_write_uniform_descriptor( desc, info, buffer, descriptor, VK_DESC_UNIFORM_CAMERA_BINDING, sizeof(vkUniformCamera_t) );
+	vk_write_uniform_descriptor( desc, info, buffer, descriptor, VK_DESC_UNIFORM_GLOBAL_BINDING, sizeof(vkUniformGlobal_t) );
 
 	qvkUpdateDescriptorSets(vk.device, VK_DESC_UNIFORM_COUNT, desc, 0, NULL);
 }
@@ -4254,6 +4261,7 @@ void vk_initialize( void )
 	vk.uniform_item_size = PAD( sizeof( vkUniform_t ), (size_t)vk.uniform_alignment );
 #ifdef USE_VK_PBR	
 	vk.uniform_camera_item_size = PAD( sizeof( vkUniformCamera_t ), (size_t)vk.uniform_alignment );
+	vk.uniform_global_item_size = PAD( sizeof( vkUniformGlobal_t ), (size_t)vk.uniform_alignment );
 #endif
 	// for flare visibility tests
 	vk.storage_alignment = MAX( props.limits.minStorageBufferOffsetAlignment, sizeof( uint32_t ) );
@@ -4558,9 +4566,9 @@ void vk_initialize( void )
 	//
 	// Descriptor set layout.
 	//
-	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, &vk.set_layout_sampler );
-	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, &vk.set_layout_uniform );
-	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, &vk.set_layout_storage );
+	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, &vk.set_layout_sampler, qfalse );
+	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, &vk.set_layout_uniform, qtrue );
+	vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_VERTEX_BIT, &vk.set_layout_storage, qfalse );
 	//vk_create_layout_binding( 0, VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, VK_SHADER_STAGE_FRAGMENT_BIT, &vk.set_layout_input );
 
 	//
@@ -6148,25 +6156,16 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 		float	identity_alpha;
 		float	acff;
 #ifdef USE_VK_PBR
-        float   specularScale_x;	// use ubo for this
-        float   specularScale_y;
-        float   specularScale_z;
-        float   specularScale_w;
-        float   normalScale_x;
-        float   normalScale_y;
-        float   normalScale_z;
-        float   normalScale_w;		// ..
         int32_t normal_texture_set;
         int32_t physical_texture_set;
         int32_t env_texture_set;
-        int32_t lightmap_texture_set;
         int32_t deluxe_mapping;
         float deluxe_specular_scale;
 #endif
     } frag_spec_data; 
 
 #ifdef USE_VK_PBR
-    VkSpecializationMapEntry spec_entries[26];
+    VkSpecializationMapEntry spec_entries[18];
 #else
     VkSpecializationMapEntry spec_entries[12];
 #endif
@@ -6789,93 +6788,37 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	frag_spec_info.mapEntryCount = 11;
 #ifdef USE_VK_PBR   
 {
-        frag_spec_info.mapEntryCount += 14;
+        frag_spec_info.mapEntryCount += 5;
 
-        {
-            spec_entries[12].constantID = 11;
-            spec_entries[12].offset = offsetof(struct FragSpecData, specularScale_x);
-            spec_entries[12].size = sizeof(frag_spec_data.specularScale_x);
-
-            spec_entries[13].constantID = 12;
-            spec_entries[13].offset = offsetof(struct FragSpecData, specularScale_y);
-            spec_entries[13].size = sizeof(frag_spec_data.specularScale_y);
-
-            spec_entries[14].constantID = 13;
-            spec_entries[14].offset = offsetof(struct FragSpecData, specularScale_z);
-            spec_entries[14].size = sizeof(frag_spec_data.specularScale_z);
-
-            spec_entries[15].constantID = 14;
-            spec_entries[15].offset = offsetof(struct FragSpecData, specularScale_w);
-            spec_entries[15].size = sizeof(frag_spec_data.specularScale_w);
-        }
-
-        {
-            spec_entries[16].constantID = 15;
-            spec_entries[16].offset = offsetof(struct FragSpecData, normalScale_x);
-            spec_entries[16].size = sizeof(frag_spec_data.normalScale_x);
-
-            spec_entries[17].constantID = 16;
-            spec_entries[17].offset = offsetof(struct FragSpecData, normalScale_y);
-            spec_entries[17].size = sizeof(frag_spec_data.normalScale_y);
-
-            spec_entries[18].constantID = 17;
-            spec_entries[18].offset = offsetof(struct FragSpecData, normalScale_z);
-            spec_entries[18].size = sizeof(frag_spec_data.normalScale_z);
-
-            spec_entries[19].constantID = 18;
-            spec_entries[19].offset = offsetof(struct FragSpecData, normalScale_w);
-            spec_entries[19].size = sizeof(frag_spec_data.normalScale_w);
-        }
-
-        spec_entries[20].constantID = 19;
-        spec_entries[20].offset = offsetof(struct FragSpecData, normal_texture_set);
-        spec_entries[20].size = sizeof(frag_spec_data.normal_texture_set);
+        spec_entries[12].constantID = 11;
+        spec_entries[12].offset = offsetof(struct FragSpecData, normal_texture_set);
+        spec_entries[12].size = sizeof(frag_spec_data.normal_texture_set);
     
-        spec_entries[21].constantID = 20;
-        spec_entries[21].offset = offsetof(struct FragSpecData, physical_texture_set);
-        spec_entries[21].size = sizeof(frag_spec_data.physical_texture_set);
+        spec_entries[13].constantID = 12;
+        spec_entries[13].offset = offsetof(struct FragSpecData, physical_texture_set);
+        spec_entries[13].size = sizeof(frag_spec_data.physical_texture_set);
 
-        spec_entries[22].constantID = 21;
-        spec_entries[22].offset = offsetof(struct FragSpecData, env_texture_set);
-        spec_entries[22].size = sizeof(frag_spec_data.env_texture_set);
-
-        spec_entries[23].constantID = 22;
-        spec_entries[23].offset = offsetof(struct FragSpecData, lightmap_texture_set);
-        spec_entries[23].size = sizeof(frag_spec_data.lightmap_texture_set);
+        spec_entries[14].constantID = 13;
+        spec_entries[14].offset = offsetof(struct FragSpecData, env_texture_set);
+        spec_entries[14].size = sizeof(frag_spec_data.env_texture_set);
         
-        spec_entries[24].constantID = 23;
-        spec_entries[24].offset = offsetof(struct FragSpecData, deluxe_mapping);
-        spec_entries[24].size = sizeof(frag_spec_data.deluxe_mapping);
+        spec_entries[15].constantID = 14;
+        spec_entries[15].offset = offsetof(struct FragSpecData, deluxe_mapping);
+        spec_entries[15].size = sizeof(frag_spec_data.deluxe_mapping);
 
-        spec_entries[25].constantID = 24;
-        spec_entries[25].offset = offsetof(struct FragSpecData, deluxe_specular_scale);
-        spec_entries[25].size = sizeof(frag_spec_data.deluxe_specular_scale);
-
-        // only use w value, specgloss maps are not supported
-        frag_spec_data.specularScale_x = def->specularScale[0];
-        frag_spec_data.specularScale_y = def->specularScale[1];
-        frag_spec_data.specularScale_z = def->specularScale[2];
-        frag_spec_data.specularScale_w = def->specularScale[3];
-
-        frag_spec_data.normalScale_x = def->normalScale[0];
-        frag_spec_data.normalScale_y = def->normalScale[1];
-        frag_spec_data.normalScale_z = def->normalScale[2];
-        frag_spec_data.normalScale_w = def->normalScale[3];
+        spec_entries[16].constantID = 15;
+        spec_entries[16].offset = offsetof(struct FragSpecData, deluxe_specular_scale);
+        spec_entries[16].size = sizeof(frag_spec_data.deluxe_specular_scale);
 
 	    if ( ( def->vk_pbr_flags & PBR_HAS_NORMALMAP ) == 0 )
             frag_spec_data.normal_texture_set = -1;
 
-	    if ( ( def->vk_pbr_flags & PBR_HAS_PHYSICALMAP ) == 0 )
+	    if ( ( def->vk_pbr_flags & PBR_HAS_SPECULARMAP ) == 0 )
             frag_spec_data.physical_texture_set = -1;
-
-	    if ( def->vk_pbr_flags & PBR_HAS_SPECULARMAP )
-            frag_spec_data.physical_texture_set = 1;
 
         if ( !vk.cubemapActive )
             frag_spec_data.env_texture_set = -1;
 
-        if ( ( def->vk_light_flags & LIGHTDEF_USE_LIGHTMAP ) == 0 )
-            frag_spec_data.lightmap_texture_set = -1;
 #ifdef HDR_DELUXE_LIGHTMAP
         if ( r_deluxeMapping->integer )
         {
@@ -8016,7 +7959,7 @@ void vk_update_descriptor_offset( int index, uint32_t offset )
 
 void vk_bind_descriptor_sets( void )
 {
-	uint32_t offsets[3], offset_count;
+	uint32_t offsets[VK_DESC_UNIFORM_COUNT], offset_count;
 	uint32_t start, end, count, i;
 
 	start = vk.cmd->descriptor_set.start;
@@ -8028,7 +7971,8 @@ void vk_bind_descriptor_sets( void )
 	offset_count = 0;
 	if ( /*start == VK_DESC_STORAGE || */ start == VK_DESC_UNIFORM ) { // uniform offset or storage offset
 		offsets[ offset_count++ ] = vk.cmd->descriptor_set.offset[ start ];
-		offsets[offset_count++] = vk.cmd->descriptor_set.offset[start+1]; // camera uniform
+		offsets[offset_count++] = vk.cmd->descriptor_set.offset[VK_DESC_UNIFORM_CAMERA_BINDING];
+		offsets[offset_count++] = vk.cmd->descriptor_set.offset[VK_DESC_UNIFORM_GLOBAL_BINDING];
 	}
 
 	count = end - start + 1;
@@ -8997,7 +8941,7 @@ qboolean vk_bloom( void )
 		// force depth range and viewport/scissor updates
 		vk.cmd->depth_range = DEPTH_RANGE_COUNT;
 
-		uint32_t offsets[2], offset_count;
+		uint32_t offsets[VK_DESC_UNIFORM_COUNT], offset_count;
 
 		// restore clobbered descriptor sets
 		for ( i = 0; i < VK_NUM_BLOOM_PASSES; i++ ) {
@@ -9007,6 +8951,7 @@ qboolean vk_bloom( void )
 
 					offsets[offset_count++] = vk.cmd->descriptor_set.offset[i];
 					offsets[offset_count++] = vk.cmd->descriptor_set.offset[VK_DESC_UNIFORM_CAMERA_BINDING];
+					offsets[offset_count++] = vk.cmd->descriptor_set.offset[VK_DESC_UNIFORM_GLOBAL_BINDING];
 
 					qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, i, 1, &vk.cmd->descriptor_set.current[i], offset_count, offsets );
 				}

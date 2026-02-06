@@ -545,9 +545,13 @@ static void ProjectDlightTexture( void ) {
 
 uint32_t vk_append_uniform( const void *uniform, size_t size, uint32_t min_offset );
 uint32_t vk_push_uniform( const vkUniform_t *uniform );
+#ifdef USE_VK_PBR
+uint32_t vk_push_uniform_global( const vkUniformGlobal_t *uniform );
+#endif
 void VK_SetFogParams( vkUniform_t *uniform, int *fogStage );
-static vkUniform_t uniform;
-static vkUniformCamera_t uniform_camera;
+static vkUniform_t			uniform;
+static vkUniformCamera_t	uniform_camera;
+static vkUniformGlobal_t	uniform_global;
 
 /*
 ===================
@@ -933,13 +937,13 @@ static qboolean vk_is_valid_pbr_surface( const qboolean hasPBR ) {
 	if ( backEnd.projection2D )
 		return qfalse;
 
-	if ( backEnd.viewParms.portalView == PV_MIRROR )
-		return qfalse;
-
-	if ( backEnd.currentEntity ) {
-		if ( backEnd.currentEntity != &tr.worldEntity )
-			return qfalse;
-	}
+	//if ( backEnd.viewParms.portalView == PV_MIRROR )
+	//	return qfalse;
+	//
+	//if ( backEnd.currentEntity ) {
+	//	if ( backEnd.currentEntity != &tr.worldEntity )
+	//		return qfalse;
+	//}
 
 	return qtrue;
 }
@@ -971,8 +975,6 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 
 	pushUniform = qfalse;
 
-	is_pbr_surface = qfalse;
-
 #ifdef USE_FOG_COLLAPSE
 	if ( fogCollapse ) {
 		VK_SetFogParams( &uniform, &fog_stage );
@@ -991,15 +993,14 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 	}
 
 #ifdef USE_VK_PBR
+	Com_Memset( &uniform_global, 0, sizeof(uniform_global) );
+
 	is_pbr_surface = vk_is_valid_pbr_surface( tess.shader->hasPBR );
 
 	if ( is_pbr_surface ) {
 		Com_Memcpy( &uniform_camera.modelMatrix, backEnd.or.modelMatrix, sizeof(float) * 16 );
 		Com_Memcpy( &uniform_camera.viewOrigin, backEnd.refdef.vieworg, sizeof( vec3_t) );
 		uniform_camera.viewOrigin[3] = 0.0;
-
-		//VectorCopy4( pStage->normalScale, uniform_global.normalScale );
-		//VectorCopy4( pStage->specularScale, uniform_global.specularScale );
 
 		vk.cmd->camera_ubo_offset = vk_append_uniform( &uniform_camera, sizeof(uniform_camera), vk.uniform_camera_item_size );
 
@@ -1063,8 +1064,11 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		Vk_Pipeline_Def	def;
 		vk_get_pipeline_def( pipeline, &def );
 
-		if ( is_pbr_surface ) 
+		//if ( is_pbr_surface ) 
 		{
+			Vector4Copy( pStage->normalScale, uniform_global.normalScale );
+			Vector4Copy( pStage->specularScale, uniform_global.specularScale );
+
 			if ( def.vk_light_flags )
 				vk_update_descriptor( VK_DESC_PBR_BRDFLUT, vk.brdflut_image_descriptor );
 				
@@ -1077,10 +1081,10 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			{
 				vk_update_descriptor(VK_DESC_PBR_PHYSICAL, tr.whiteImage->descriptor);
 
-				//uniform_global.specularScale[0] = 0.0f;
-				//uniform_global.specularScale[2] =
-				//uniform_global.specularScale[3] = 1.0f;
-				//uniform_global.specularScale[1] = 0.5f;
+				uniform_global.specularScale[0] = 0.0f;
+				uniform_global.specularScale[2] =
+				uniform_global.specularScale[3] = 1.0f;
+				uniform_global.specularScale[1] = 0.5f;
 			}
 
 			if ( vk.useFastLight || (!tr.numCubemaps || backEnd.viewParms.targetCube != NULL) ) {
@@ -1099,13 +1103,15 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 				if ( def.vk_light_flags & LIGHTDEF_USE_LIGHTMAP && def.vk_pbr_flags & PBR_HAS_DELUXEMAP0 )
 					vk_update_descriptor(  VK_DESC_PBR_DELUXE, pStage->bundle[0].deluxeMap->descriptor );
 
-				if ( def.vk_light_flags & LIGHTDEF_USE_LIGHTMAP && def.vk_pbr_flags & PBR_HAS_DELUXEMAP1 )
+				else if ( def.vk_light_flags & LIGHTDEF_USE_LIGHTMAP && def.vk_pbr_flags & PBR_HAS_DELUXEMAP1 )
 					vk_update_descriptor(  VK_DESC_PBR_DELUXE, pStage->bundle[1].deluxeMap->descriptor );
 
 				else
 					vk_update_descriptor(  VK_DESC_PBR_DELUXE, tr.whiteImage->descriptor );
-				}
 			#endif
+		}
+
+		vk_push_uniform_global( &uniform_global );
 #endif
 
 #ifdef USE_VK_PBR
@@ -1261,6 +1267,20 @@ uint32_t vk_push_uniform( const vkUniform_t *uniform ) {
 	vk_update_descriptor_offset( VK_DESC_UNIFORM_CAMERA_BINDING, vk.cmd->camera_ubo_offset );
 
 	return offset;
+}
+
+uint32_t vk_push_uniform_global( const vkUniformGlobal_t *uniform ) {	
+	const uint32_t offset = PAD(vk.cmd->vertex_buffer_offset, (VkDeviceSize)vk.uniform_alignment);
+
+	if ( offset + vk.uniform_global_item_size > vk.geometry_buffer_size )
+		return ~0U;
+
+	Com_Memcpy( vk.cmd->vertex_buffer_ptr + offset, uniform, sizeof(*uniform) );
+	vk.cmd->vertex_buffer_offset = offset + vk.uniform_global_item_size;
+
+	vk_update_descriptor_offset( VK_DESC_UNIFORM_GLOBAL_BINDING, offset );
+
+	return 0;
 }
 
 #ifdef USE_PMLIGHT

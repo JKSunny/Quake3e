@@ -43,6 +43,13 @@ layout(set = 0, binding = 0) uniform UBO {
 };
 #endif
 
+#if defined(PER_PIXEL_LIGHTING) || defined(USE_LIGHT_VECTOR)
+	layout(set = 0, binding = 2) uniform Global {
+		vec4				u_SpecularScale;	
+		vec4				u_NormalScale;	
+	};	
+#endif
+
 layout(set = 1, binding = 0) uniform sampler2D texture0;
 #ifdef USE_TX1
 layout(set = 2, binding = 0) uniform sampler2D texture1;
@@ -127,24 +134,11 @@ layout (constant_id = 10) const int acff = 0; // NONE, RGB, RGBA, ALPHA
 	layout(set = 8, binding = 0) uniform samplerCube env_texture;
 	layout(set = 9, binding = 0) uniform sampler2D deluxe_texture;
 
-	// prob use ubo for specularScale & normalScale ..
-	layout (constant_id = 11) const float specularScale_x = 1.0;
-	layout (constant_id = 12) const float specularScale_y = 1.0;
-	layout (constant_id = 13) const float specularScale_z = 1.0;
-	layout (constant_id = 14) const float specularScale_w = 1.0;
-
-	layout (constant_id = 15) const float normalScale_x = 0.0;
-	layout (constant_id = 16) const float normalScale_y = 0.0;
-	layout (constant_id = 17) const float normalScale_z = 0.0;
-	layout (constant_id = 18) const float normalScale_w = 0.0;
-
-	layout (constant_id = 19) const int normal_texture_set = 0;
-	layout (constant_id = 20) const int physical_texture_set = 0;
-	layout (constant_id = 21) const int env_texture_set = 0;
-	layout (constant_id = 22) const int lightmap_texture_set = 0;
-
-	layout (constant_id = 23) const int deluxe_mapping			= -1; // -1: deluxemapping off, 0: on, 1: on + bound
-	layout (constant_id = 24) const float deluxe_specular_scale = 1.0;
+	layout (constant_id = 11) const int normal_texture_set = 0;
+	layout (constant_id = 12) const int physical_texture_set = 0;
+	layout (constant_id = 13) const int env_texture_set = 0;
+	layout (constant_id = 14) const int deluxe_mapping			= -1; // -1: deluxemapping off, 0: on, 1: on + bound
+	layout (constant_id = 15) const float deluxe_specular_scale = 1.0;
 #endif
 
 #ifdef USE_ATEST
@@ -179,7 +173,7 @@ float CorrectAlpha(float threshold, float alpha, vec2 tc)
 			vec3 biTangent = vertexTangent.w * cross(vertexNormal, vertexTangent.xyz);
 			vec3 n = texture(normal_texture, frag_tex_coord).agb - vec3(0.5);
 
-			n.xy *= vec2( normalScale_x, normalScale_y );
+			n.xy *= u_NormalScale.xy;
 			n.z = sqrt(clamp((0.25 - n.x * n.x) - n.y * n.y, 0.0, 1.0));
 			n = n.x * vertexTangent.xyz + n.y * biTangent + n.z * vertexNormal;
 
@@ -657,13 +651,14 @@ void main() {
 		E = normalize(viewDir);
 
 		L = var_LightDir.xyz;
-		float sqrLightDist = dot(L, L);
-		L /= sqrt(sqrLightDist);
 
 		#if defined(USE_LIGHTMAP) && defined(USE_TX_BOTH)
 			if ( deluxe_mapping > 0 )
 				L = ( texture(deluxe_texture, frag_tex_coord1).rgb - vec3(0.5) );
 		#endif
+
+		float sqrLightDist = dot(L, L);
+		L /= sqrt(sqrLightDist);
 
 		// FIX ME
 		#if defined (USE_CLX_IDENT)
@@ -717,10 +712,9 @@ void main() {
 		float AO = 1.0;
 
 		// metallic roughness workflow
-		if ( physical_texture_set == 0 ) {
+		if ( physical_texture_set < 0 ) {
 			vec4 ORMS = texture( physical_texture, frag_tex_coord0 );
-			ORMS.xyzw *= vec4( specularScale_z, specularScale_w, specularScale_x, specularScale_y );
-
+			ORMS.xyzw *= u_SpecularScale.zwxy;
 			specular.rgb = mix( vec3( 0.08 ) * ORMS.w, diffuse.rgb, ORMS.z );
 			diffuse.rgb *= vec3( 1.0 - ORMS.z );
 
@@ -729,10 +723,11 @@ void main() {
 		}
 
 		// specular workflow
-		else if( physical_texture_set == 1 ){
+		else 
+		{
 			specular = texture( physical_texture, frag_tex_coord0 );
-			specular.rgb *= vec3( specularScale_x, specularScale_y, specularScale_z );
-			roughness = mix( 1.0, 0.01, specular.a * ( 1.0 - specularScale_w ) );
+			specular.rgb *= u_SpecularScale.xyz;
+			roughness = mix( 1.0, 0.01, specular.a * ( 1.0 - u_SpecularScale.w ) );
 		}
 
 		ambientColor *= AO;
@@ -744,16 +739,20 @@ void main() {
 
 		vec3  Fd = CalcDiffuse( diffuse.rgb, NE, NL, LH, roughness );
 		vec3  Fs = vec3( 0.0 );
-		float NH = clamp( dot( N, H ), 0.0, 1.0 );
-		float VH = clamp( dot( E, H ), 0.0, 1.0 );
+		float NH = 0.0; // for debugging
+		float VH = 0.0; // for debugging
 
 		#if defined(USE_LIGHT_VECTOR)
+			NH = clamp( dot( N, H ), 0.0, 1.0 );
+			VH = clamp( dot( E, H ), 0.0, 1.0 );
 			Fs = CalcSpecular( specular.rgb, NH, NL, NE, LH, VH, roughness );
 		#endif
 
 		#if ( defined(USE_LIGHTMAP) || defined(USE_LIGHT_VERTEX) )
 			if ( deluxe_specular_scale != 0.0 && deluxe_mapping > -1 )
 			{
+				NH = clamp( dot( N, H ), 0.0, 1.0 );
+				VH = clamp( dot( E, H ), 0.0, 1.0 );
 				Fs = CalcSpecular( specular.rgb, NH, NL, NE, LH, VH, roughness ) * deluxe_specular_scale;
 			}
 		#endif
