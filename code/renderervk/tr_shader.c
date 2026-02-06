@@ -1185,6 +1185,17 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 			{
 				stage->bundle[0].rgbGen = CGEN_EXACT_VERTEX;
 			}
+			else if ( !Q_stricmp( token, "vertexLit" ) )
+			{
+				stage->bundle[0].rgbGen = CGEN_VERTEX_LIT;
+				if ( stage->bundle[0].alphaGen == 0 ) {
+					stage->bundle[0].alphaGen = AGEN_VERTEX;
+				}
+			}
+			else if ( !Q_stricmp( token, "exactVertexLit" ) )
+			{
+				stage->bundle[0].rgbGen = CGEN_EXACT_VERTEX_LIT;
+			}
 			else if ( !Q_stricmp( token, "lightingDiffuse" ) )
 			{
 				stage->bundle[0].rgbGen = CGEN_LIGHTING_DIFFUSE;
@@ -1364,7 +1375,7 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 	}
 
 #ifdef USE_VK_PBR
-	if ( vk.pbrActive && ( physicalAlbedo || stage->physicalMapType != PHYS_NONE ) ) {
+	if ( !vk.useFastLight && ( physicalAlbedo || stage->physicalMapType != PHYS_NONE ) ) {
 		uint32_t i;
 		imgFlags_t flags = IMGFLAG_NOLIGHTSCALE;
 
@@ -1381,6 +1392,7 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 		if ( !stage->physicalMap && stage->physicalMapType != PHYS_NONE )
 			vk_create_phyisical_texture( stage, bufferPackedTextureName, flags );
 		
+#if 0
 		// scan for a potential physical map
 		if ( !stage->physicalMap && physicalAlbedo ) {
 			for ( i = 0; i < ARRAY_LEN( textureMapTypes ); i++ ) {
@@ -1394,13 +1406,13 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 				}
 			}
 		}
-		
+#endif
 		flags |= IMGFLAG_NO_COMPRESSION;
 		
 		// load defined normal map
 		if ( stage->normalMapType != PHYS_NONE )
 			vk_create_normal_texture( stage, bufferNormalTextureName, flags );
-		
+#if 0
 		// scan for a potential normal map
 		if ( !stage->normalMap && physicalAlbedo ) {
 			for ( i = 0; i < ARRAY_LEN( textureMapTypes ); i++ ) {
@@ -1414,6 +1426,7 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 				}
 			}
 		}
+#endif
 	}
 #endif
 
@@ -3325,6 +3338,15 @@ static void InitShader( const char *name, int lightmapIndex ) {
 		stages[i].bundle[0].texMods = texMods[i];
 	}
 
+#ifdef USE_VK_PBR
+		// default normal/specular
+		Vector4Set(stages[i].normalScale, 0.0f, 0.0f, 0.0f, 0.0f);
+		stages[i].specularScale[0] =
+		stages[i].specularScale[1] =
+		stages[i].specularScale[2] = r_baseSpecular->value;
+		stages[i].specularScale[3] = 0.99f;
+#endif
+
 #ifdef USE_PMLIGHT
 	shader.lightingBundle = 0;
 	shader.lightingStage = -1;
@@ -3699,6 +3721,7 @@ static shader_t *FinishShader( void ) {
 			int env_mask;
 			shaderStage_t *pStage = &stages[i];
 			def.state_bits = pStage->stateBits;
+			def.vk_light_flags = 0;
 			def.vk_pbr_flags = 0;
 
 			if ( pStage->mtEnv3 ) {
@@ -3889,21 +3912,92 @@ static shader_t *FinishShader( void ) {
 				}
 			}
 
-			if ( pStage->vk_pbr_flags && def.shader_type >= TYPE_GENERIC_BEGIN  )
+#ifdef USE_VK_PBR
+			if ( def.shader_type >= TYPE_GENERIC_BEGIN  )
 			{
-			#ifdef USE_VK_PBR
-				def.vk_pbr_flags = pStage->vk_pbr_flags;
-				pStage->tessFlags |= TESS_PBR;
-				shader.hasPBR = qtrue;
-
 				if ( hasLightmapStage )
 				{
-					def.vk_pbr_flags |= PBR_HAS_LIGHTMAP;
+					def.vk_light_flags |= LIGHTDEF_USE_LIGHTMAP;
+				}
+				else if ( pStage->bundle[0].rgbGen == CGEN_LIGHTING_DIFFUSE )
+				{
+					def.vk_light_flags |= LIGHTDEF_USE_LIGHT_VECTOR;
+				}
+				else if ( pStage->bundle[0].rgbGen == CGEN_VERTEX_LIT || 
+						  pStage->bundle[0].rgbGen == CGEN_EXACT_VERTEX_LIT )
+				{
+					def.vk_light_flags |= LIGHTDEF_USE_LIGHT_VERTEX;
 				}
 
-#ifdef HDR_DELUXE_LIGHTMAP
-				if ( def.vk_pbr_flags & PBR_HAS_LIGHTMAP )
+				image_t *albedo;
+
+				if ( !pStage->bundle[0].lightmap && (albedo = pStage->bundle[0].image[0]) != NULL &&
+					def.vk_light_flags && !vk.useFastLight )
 				{
+					uint32_t j;
+					char imageName[MAX_QPATH];
+					imgFlags_t flags = IMGFLAG_NOLIGHTSCALE;
+
+					if ( !shader.noMipMaps )	flags |= IMGFLAG_MIPMAP;
+					if ( !shader.noPicMip )		flags |= IMGFLAG_PICMIP;
+
+					if ( !pStage->physicalMap ) 
+					{
+						for ( j = 0; j < ARRAY_LEN( textureMapTypes ); j++ ) 
+						{
+							COM_StripExtension( albedo->imgName, imageName, MAX_QPATH );
+							Q_strcat( imageName, MAX_QPATH, textureMapTypes[j].suffix );
+							pStage->physicalMapType = textureMapTypes[j].type;
+
+							if ( vk_create_phyisical_texture( pStage, imageName, flags ) ) {
+								break;
+							}
+						}
+					}
+
+					flags |= IMGFLAG_NO_COMPRESSION;
+
+					if ( !pStage->normalMap ) 
+					{
+						for ( j = 0; j < ARRAY_LEN( textureMapTypes ); j++ ) 
+						{
+							COM_StripExtension( albedo->imgName, imageName, MAX_QPATH );
+							Q_strcat( imageName, MAX_QPATH, textureMapTypes[j].suffix );
+							pStage->normalMapType = textureMapTypes[j].type;
+
+							if ( vk_create_normal_texture( pStage, imageName, flags ) ) {
+								break;
+							}
+						}
+					}
+
+					#ifdef VK_COMPUTE_NORMALMAP
+						if ( !pStage->normalMap && r_genNormalMaps->integer )
+							vk_add_compute_normalmap( pStage, albedo, flags );
+					#endif
+
+					if ( pStage->normalMap && !pStage->physicalMap ) 
+					{
+						pStage->specularScale[0] = 0.0f;
+						pStage->specularScale[2] =
+						pStage->specularScale[3] = 1.0f;
+						pStage->specularScale[1] = 0.5f;
+						pStage->physicalMap = tr.whiteImage;
+						pStage->physicalMapType = PHYS_RMO;
+						pStage->vk_pbr_flags |= PBR_HAS_PHYSICALMAP;
+					}
+				}
+
+				def.vk_pbr_flags = pStage->vk_pbr_flags;
+
+				if ( def.vk_light_flags && !vk.useFastLight ) 
+				{
+					pStage->tessFlags |= TESS_TANGENT | TESS_NNN;
+
+					if ( !(def.vk_light_flags & LIGHTDEF_USE_LIGHT_VECTOR) )
+						pStage->tessFlags |= TESS_LIGHTDIR;
+
+#ifdef HDR_DELUXE_LIGHTMAP
 					// aparently lightmap is not always in bundle 1 ..
 					// should probably fix this in collapseMuklitexture
 					if ( pStage->bundle[0].deluxeMap )
@@ -3912,14 +4006,36 @@ static shader_t *FinishShader( void ) {
 					// lightmap moved to bundle 1
 					else if ( pStage->bundle[1].deluxeMap )	
 						def.vk_pbr_flags |= PBR_HAS_DELUXEMAP1;
-				}
 #endif
+				}
+
+				// want to get rid of this
+				shader.hasPBR = (qboolean)def.vk_pbr_flags;
+
 				// move this to ubo ..
 				Vector4Copy( pStage->specularScale, def.specularScale );
 				Vector4Copy( pStage->normalScale, def.normalScale );
-			#endif
 			}
 
+			Vk_Shader_Type	stype;
+			stype = def.shader_type;
+			def.mirror = qfalse;
+			pStage->vk_pipeline[0] = vk_find_pipeline_ext( 0, &def, qtrue );
+			if ( pStage->depthFragment ) {
+				def.shader_type = TYPE_SIGNLE_TEXTURE_DF;
+				pStage->vk_pipeline_df = vk_find_pipeline_ext( 0, &def, qtrue );
+				def.shader_type = stype;
+			}
+
+			def.mirror = qtrue;
+			def.vk_pbr_flags = 0;	// this
+			pStage->vk_mirror_pipeline[0] = vk_find_pipeline_ext( 0, &def, qfalse );
+			if ( pStage->depthFragment ) {
+				def.shader_type = TYPE_SIGNLE_TEXTURE_DF;
+				pStage->vk_pipeline_df = vk_find_pipeline_ext( 0, &def, qfalse );
+				def.shader_type = stype;
+			}
+#else
 			def.mirror = qfalse;
 			pStage->vk_pipeline[0] = vk_find_pipeline_ext( 0, &def, qtrue );
 			def.mirror = qtrue;
@@ -3927,16 +4043,13 @@ static shader_t *FinishShader( void ) {
 
 			if ( pStage->depthFragment ) {
 				def.mirror = qfalse;
-				#ifdef USE_VK_PBR
-					def.vk_pbr_flags = 0;
-				#endif
 				def.shader_type = TYPE_SIGNLE_TEXTURE_DF;
 				pStage->vk_pipeline_df = vk_find_pipeline_ext( 0, &def, qtrue );
 				def.mirror = qtrue;
 				def.shader_type = TYPE_SIGNLE_TEXTURE_DF;
 				pStage->vk_mirror_pipeline_df = vk_find_pipeline_ext( 0, &def, qfalse );
 			}
-
+#endif
 
 #ifdef USE_FOG_COLLAPSE
 			if ( fogCollapse && tr.numFogs > 0 ) {

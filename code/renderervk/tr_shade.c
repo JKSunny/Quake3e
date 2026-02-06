@@ -1063,16 +1063,27 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		Vk_Pipeline_Def	def;
 		vk_get_pipeline_def( pipeline, &def );
 
-		if ( is_pbr_surface && pStage->vk_pbr_flags ) {
-			vk_update_descriptor( VK_DESC_PBR_BRDFLUT, vk.brdflut_image_descriptor );
+		if ( is_pbr_surface ) 
+		{
+			if ( def.vk_light_flags )
+				vk_update_descriptor( VK_DESC_PBR_BRDFLUT, vk.brdflut_image_descriptor );
 				
 			if ( pStage->vk_pbr_flags & PBR_HAS_NORMALMAP )
 				vk_update_descriptor( VK_DESC_PBR_NORMAL, pStage->normalMap->descriptor );
 
 			if ( pStage->vk_pbr_flags & PBR_HAS_PHYSICALMAP || pStage->vk_pbr_flags & PBR_HAS_SPECULARMAP )
 				vk_update_descriptor( VK_DESC_PBR_PHYSICAL, pStage->physicalMap->descriptor );
-			
-			if ( !tr.numCubemaps || backEnd.viewParms.targetCube != NULL ) {
+			else
+			{
+				vk_update_descriptor(VK_DESC_PBR_PHYSICAL, tr.whiteImage->descriptor);
+
+				//uniform_global.specularScale[0] = 0.0f;
+				//uniform_global.specularScale[2] =
+				//uniform_global.specularScale[3] = 1.0f;
+				//uniform_global.specularScale[1] = 0.5f;
+			}
+
+			if ( vk.useFastLight || (!tr.numCubemaps || backEnd.viewParms.targetCube != NULL) ) {
 				vk_update_descriptor( VK_DESC_PBR_CUBEMAP, tr.emptyCubemap->descriptor );
 				//vk_update_descriptor( 10, tr.emptyCubemap->descriptor ); // irradiance is currently unused
 			}
@@ -1085,10 +1096,10 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			#ifdef HDR_DELUXE_LIGHTMAP
 				// aparently lightmap is not always in bundle 1 ..
 				// should probably fix this in collapseMuklitexture
-				if ( def.vk_pbr_flags & PBR_HAS_DELUXEMAP0 )
+				if ( def.vk_light_flags & LIGHTDEF_USE_LIGHTMAP && def.vk_pbr_flags & PBR_HAS_DELUXEMAP0 )
 					vk_update_descriptor(  VK_DESC_PBR_DELUXE, pStage->bundle[0].deluxeMap->descriptor );
 
-				if ( def.vk_pbr_flags & PBR_HAS_DELUXEMAP1 )
+				if ( def.vk_light_flags & LIGHTDEF_USE_LIGHTMAP && def.vk_pbr_flags & PBR_HAS_DELUXEMAP1 )
 					vk_update_descriptor(  VK_DESC_PBR_DELUXE, pStage->bundle[1].deluxeMap->descriptor );
 
 				else

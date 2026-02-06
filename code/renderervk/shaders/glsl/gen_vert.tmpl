@@ -1,5 +1,13 @@
 #version 450
 
+#if defined(USE_LIGHTMAP) || defined(USE_LIGHT_VECTOR) || defined(USE_LIGHT_VERTEX)
+	#define USE_LIGHT
+#endif
+
+#if defined(USE_LIGHT) && !defined(USE_FAST_LIGHT)
+	#define PER_PIXEL_LIGHTING 
+#endif
+
 #ifdef USE_TX2
 #define USE_TX1
 #endif
@@ -36,6 +44,20 @@ layout(set = 0, binding = 0) uniform UBO {
 };
 #endif
 
+#if defined(PER_PIXEL_LIGHTING) || defined(USE_LIGHT_VECTOR) 
+	layout(set = 0, binding = 1) uniform UBO_Camera {
+		vec4 u_ViewOrigin;
+		mat4 u_ModelMatrix;
+	};
+#endif
+
+#if defined(PER_PIXEL_LIGHTING)
+	layout(location = 9) out vec4 var_Normal;
+	layout(location = 10) out vec4 var_LightDir;
+	layout(location = 11) out vec4 var_ViewDir;
+	layout(location = 12) out vec4 var_Tangent;
+#endif
+
 layout(location = 0) in vec3 in_position;
 
 #ifndef USE_ENV
@@ -49,8 +71,10 @@ layout(location = 3) in vec2 in_tex_coord1;
 layout(location = 4) in vec2 in_tex_coord2;
 #endif
 
-#if defined(USE_ENV) || defined(USE_VK_PBR)
-layout(location = 5) in vec3 in_normal;
+#if defined(PER_PIXEL_LIGHTING) || defined(USE_ENV)
+	layout(location = 5) in vec3 in_normal;
+#elif defined(USE_LIGHT_VECTOR) && defined(USE_FAST_LIGHT)
+	layout(location = 5) in vec3 in_normal;
 #endif
 
 #if defined (USE_CLX_IDENT) || defined (USE_FIXED_COLOR)
@@ -85,21 +109,12 @@ layout(location = 3) out vec2 frag_tex_coord2;
 layout(location = 4) out vec2 fog_tex_coord;
 #endif
 
-#ifdef USE_VK_PBR
-layout(set = 0, binding = 1) uniform UBO_Camera {
-	vec4 u_ViewOrigin;
-	mat4 u_ModelMatrix;
-};
+#if defined(PER_PIXEL_LIGHTING)
+	layout(location = 8) in vec4 in_tangent;
 
-
-layout(location = 8) in vec4 in_tangent;
-layout(location = 9) in vec4 in_lightdir;
-
-layout(location = 9) out vec4 var_Normal;
-layout(location = 10) out vec4 var_LightDir;
-layout(location = 11) out vec4 var_ViewDir;
-layout(location = 12) out vec4 var_Tangent;
-
+	#if !defined(USE_LIGHT_VECTOR)
+		layout(location = 9) in vec4 in_lightdir;
+	#endif
 #endif
 
 out gl_PerVertex {
@@ -107,17 +122,22 @@ out gl_PerVertex {
 };
 
 void main() {
-	gl_Position = mvp * vec4(in_position, 1.0);
-
-	#ifdef USE_VK_PBR
-		vec3 tangent = in_tangent.xyz;
-	#endif
-
+#if defined(USE_VERTEX_ANIMATION)
+	// ..
+#elif defined(USE_BONE_ANIMATION)
+	// ..
+#else
 	vec3 position = in_position;
-	#if defined(USE_ENV) || defined(USE_VK_PBR)
+
+	#if defined(USE_ENV) || (defined(USE_LIGHT) && (!defined(USE_FAST_LIGHT) || defined(USE_LIGHT_VECTOR)))
 		vec3 normal = in_normal;
 	#endif
 
+	#ifdef PER_PIXEL_LIGHTING
+		vec3 tangent = in_tangent.xyz;
+	#endif
+#endif
+	
 #if defined (USE_CLX_IDENT) || defined (USE_FIXED_COLOR)
 	// use either 1.0 or fixed (rgb+a) color from spec.constants
 #else
@@ -129,6 +149,8 @@ void main() {
 	frag_color2 = in_color2;
 #endif
 #endif
+
+	gl_Position = mvp * vec4(position, 1.0);
 
 #ifdef USE_ENV
 	vec3 viewer = normalize(eyePos.xyz - position);
@@ -149,8 +171,8 @@ void main() {
 #endif
 
 #ifdef USE_FOG
-	float s = dot(in_position, fogDistanceVector.xyz) + fogDistanceVector.w;
-	float t = dot(in_position, fogDepthVector.xyz) + fogDepthVector.w;
+	float s = dot(position, fogDistanceVector.xyz) + fogDistanceVector.w;
+	float t = dot(position, fogDepthVector.xyz) + fogDepthVector.w;
 
 	if ( fogEyeT.y == 1.0 ) {
 		if ( t < 0.0 ) {
@@ -169,15 +191,48 @@ void main() {
 	fog_tex_coord = vec2(s, t);
 #endif // USE_FOG
 
-#if defined(USE_VK_PBR)
-	position		= (u_ModelMatrix * vec4(position, 1.0)).xyz;
-	normal			= normalize(mat3(u_ModelMatrix) * normal);
+#ifdef USE_LIGHT
+	#if !defined(USE_FAST_LIGHT) || defined(USE_LIGHT_VECTOR)
+		position		= (u_ModelMatrix * vec4(position, 1.0)).xyz;
+		normal			= normalize(mat3(u_ModelMatrix) * normal);
+		#if !defined(USE_FAST_LIGHT)
+			tangent			= normalize(mat3(u_ModelMatrix) * tangent);
+		#endif
+	#endif
 
+	#if defined(USE_LIGHT_VECTOR)
+		//vec3 L	= u_LocalLightOrigin.xyz - (position * u_LocalLightOrigin.w);
+		vec3 L	= vec3(0.5);
+	#elif defined(PER_PIXEL_LIGHTING)
+		vec3 L	= in_lightdir.xyz * 2.0 - vec3(1.0);
+		//vec3 L	= in_lightdir.xyz;
+		L		= ( u_ModelMatrix * vec4( L, 0.0 ) ).xyz;
+		L		= normalize( ( L * 0.5 ) + vec3( 0.5 ) );
+	#endif
+#endif
+
+#if defined (USE_CLX_IDENT) || defined (USE_FIXED_COLOR)
+	// use either 1.0 or fixed (rgb+a) color from spec.constants
+#else
+#if 0
+	#if defined(USE_LIGHT_VECTOR) && defined(USE_FAST_LIGHT)
+		float sqrLightDist = dot(L, L);
+		float NL = clamp(dot(normal, L) / sqrt(sqrLightDist), 0.0, 1.0);
+
+		frag_color0.rgb *= u_directedLight.rgb * NL + u_ambientLight.rgb;
+
+		#ifdef USE_CL1
+			frag_color1.rgb *= u_directedLight.rgb * NL + u_ambientLight.rgb;
+		#endif
+		#ifdef USE_CL2
+			frag_color2.rgb *= u_directedLight.rgb * NL + u_ambientLight.rgb;
+		#endif
+	#endif
+#endif
+#endif
+
+#ifdef PER_PIXEL_LIGHTING 
 	vec3 viewDir = u_ViewOrigin.xyz - position;
-
-	vec3 L	= in_lightdir.xyz * 2.0 - vec3(1.0);
-	L		= ( u_ModelMatrix * vec4( L, 0.0 ) ).xyz;
-	L		= normalize( ( L * 0.5 ) + vec3( 0.5 ) );
 
 	var_LightDir	= vec4(L, 0.0);
 	var_Normal		= vec4(normal, 0.0);

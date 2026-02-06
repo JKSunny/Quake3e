@@ -1297,7 +1297,7 @@ static void RB_SurfaceGrid( srfGridMesh_t *cv ) {
 				}
 
 #ifdef USE_VK_PBR
-				if( vk.pbrActive ) {
+				if ( !vk.useFastLight ) {
 					qtangent[0] = dv->qtangent[0];
 					qtangent[1] = dv->qtangent[1];
 					qtangent[2] = dv->qtangent[2];

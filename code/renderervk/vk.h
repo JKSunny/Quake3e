@@ -202,6 +202,7 @@ typedef struct {
 	int allow_discard;
 
 #ifdef USE_VK_PBR
+	int						vk_light_flags;
 	uint32_t				vk_pbr_flags;
 	vec4_t					specularScale;
 	vec4_t					normalScale;
@@ -257,17 +258,17 @@ typedef struct vkUniformCamera_s {
 #define TESS_ENT0  (1024) // uniform with ent.color[0]
 #define TESS_ENT1  (2048) // uniform with ent.color[1]
 #define TESS_ENT2  (4096) // uniform with ent.color[2]
-#define TESS_ENV   (512) // mark shader stage with environment mapping
 
 #ifdef USE_VK_PBR
-#define TESS_PBR   				( 1024 ) // PBR shader variant, qtangent vertex attribute and eyePos uniform
+#define TESS_TANGENT   (1u << 13)  // 8192
+#define TESS_LIGHTDIR  (1u << 14)  // 16384
+
 
 #define PBR_HAS_NORMALMAP		( 1 )
 #define PBR_HAS_PHYSICALMAP		( 2 )
 #define PBR_HAS_SPECULARMAP		( 4 )
-#define PBR_HAS_LIGHTMAP		( 8 )
-#define PBR_HAS_DELUXEMAP0		( 16 )
-#define PBR_HAS_DELUXEMAP1		( 32 )
+#define PBR_HAS_DELUXEMAP0		( 8 )
+#define PBR_HAS_DELUXEMAP1		( 16 )
 
 #define PHYS_NONE				( 1 )
 #define PHYS_RMO				( 2 )
@@ -279,6 +280,11 @@ typedef struct vkUniformCamera_s {
 #define PHYS_NORMAL   			( 128 )	
 #define PHYS_NORMALHEIGHT		( 256 )	
 #define PHYS_SPECGLOSS					( 512 )	
+
+#define LIGHTDEF_USE_LIGHTMAP			0x0001
+#define LIGHTDEF_USE_LIGHT_VECTOR		0x0002
+#define LIGHTDEF_USE_LIGHT_VERTEX		0x0004
+#define LIGHTDEF_LIGHTTYPE_MASK			LIGHTDEF_USE_LIGHTMAP | LIGHTDEF_USE_LIGHT_VECTOR | LIGHTDEF_USE_LIGHT_VERTEX
 
 #define ByteToFloat(a)			((float)(a) * 1.0f/255.0f)
 #define FloatToByte(a)			(byte)((a) * 255.0f)
@@ -608,9 +614,9 @@ typedef struct {
 	struct {
 		struct {
 #ifdef USE_VK_PBR
-			VkShaderModule gen[2][3][2][2][2]; // pbr[0,1], tx[0,1,2], cl[0,1] env0[0,1] fog[0,1]
-			VkShaderModule ident1[2][2][2][2]; // pbr[0,1], tx[0,1], env0[0,1] fog[0,1]
-			VkShaderModule fixed[2][2][2][2];  // pbr[0,1], tx[0,1], env0[0,1] fog[0,1]
+			VkShaderModule gen[2][4][3][2][2][2]; // fastlight[0,1], tx[0,1,2], cl[0,1] env0[0,1] fog[0,1]
+			VkShaderModule ident1[2][4][2][2][2]; // fastlight[0,1], tx[0,1], env0[0,1] fog[0,1]
+			VkShaderModule fixed[2][4][2][2][2];  // fastlight[0,1], tx[0,1], env0[0,1] fog[0,1]
 #else
 			VkShaderModule gen[3][2][2][2]; // tx[0,1,2], cl[0,1] env0[0,1] fog[0,1]
 			VkShaderModule ident1[2][2][2]; // tx[0,1], env0[0,1] fog[0,1]
@@ -621,10 +627,10 @@ typedef struct {
 		struct {
 			VkShaderModule gen0_df;
 #ifdef USE_VK_PBR
-			VkShaderModule gen[2][3][2][2]; // pbr[0,1], tx[0,1,2] cl[0,1] fog[0,1]
-			VkShaderModule ident1[2][2][2]; // pbr[0,1], tx[0,1], fog[0,1]
-			VkShaderModule fixed[2][2][2];  // pbr[0,1], tx[0,1], fog[0,1]
-			VkShaderModule ent[2][1][2];    // pbr[0,1], tx[0], fog[0,1]
+			VkShaderModule gen[2][4][3][2][2]; // fastlight[0,1], tx[0,1,2] cl[0,1] fog[0,1]
+			VkShaderModule ident1[2][4][2][2]; // fastlight[0,1], tx[0,1], fog[0,1]
+			VkShaderModule fixed[2][4][2][2];  // fastlight[0,1], tx[0,1], fog[0,1]
+			VkShaderModule ent[2][4][1][2];    // fastlight[0,1], tx[0], fog[0,1]
 #else
 			VkShaderModule gen[3][2][2]; // tx[0,1,2] cl[0,1] fog[0,1]
 			VkShaderModule ident1[2][2]; // tx[0,1], fog[0,1]
@@ -746,6 +752,9 @@ typedef struct {
 	qboolean blitEnabled;
 	qboolean msaaActive;
 #ifdef USE_VK_PBR
+	qboolean normalMappingActive;
+	qboolean specularMappingActive;
+	qboolean useFastLight;
 	qboolean pbrActive;
 #endif
 #ifdef VK_CUBEMAP
