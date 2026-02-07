@@ -2197,6 +2197,7 @@ void RE_VertexLighting( qboolean allowed );
 // mikktspace
 void		vk_mikkt_bsp_tri_generate( srfTriangles_t *tri );
 void		vk_mikkt_bsp_face_generate( srfSurfaceFace_t *face );
+void		vk_mikkt_mdv_generate( int numSurfaces, mdvVertex_t *verts, vec4_t *tangents, mdvSt_t *st, glIndex_t *indices );
 
 #ifdef VK_COMPUTE_NORMALMAP
 // compute normalmap

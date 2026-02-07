@@ -866,6 +866,28 @@ static qboolean R_LoadMD3(model_t * mod, int lod, void *buffer, int bufferSize, 
 		}
 
 		// calc tangent spaces
+#if 1
+		for (f = 0; f < mdvModel->numFrames; f++)
+		{
+			vec4_t *tangentsf = ri.Hunk_AllocateTempMemory(sizeof(vec4_t) * surf->numVerts);
+
+			vk_mikkt_mdv_generate(
+				surf->numIndexes / 3,
+				surf->verts    + f * surf->numVerts,
+				tangentsf,
+				surf->st,
+				surf->indexes
+			);
+
+			v = surf->verts + f * surf->numVerts;
+			for (j = 0; j < surf->numVerts; j++, v++)
+			{
+				Com_Memcpy(v->tangent, tangentsf[j], sizeof(vec4_t));
+			}
+
+			ri.Hunk_FreeTempMemory(tangentsf);
+		}
+#else
 		{
 			vec3_t *sdirs = ri.Malloc(sizeof(*sdirs) * surf->numVerts * mdvModel->numFrames);
 			vec3_t *tdirs = ri.Malloc(sizeof(*tdirs) * surf->numVerts * mdvModel->numFrames);
@@ -923,12 +945,13 @@ static qboolean R_LoadMD3(model_t * mod, int lod, void *buffer, int bufferSize, 
 				v->tangent[0] = 1.0;
 				v->tangent[1] = 0.0;
 				v->tangent[2] = 0.0;
-				v->normal[3] = 1.0;
+				v->tangent[3] = 1.0;
 			}
 
 			ri.Free(sdirs);
 			ri.Free(tdirs);
 		}
+#endif
 
 		// find the next surface
 		md3Surf = (md3Surface_t *) ((byte *) md3Surf + md3Surf->ofsEnd);

@@ -187,3 +187,86 @@ void vk_mikkt_bsp_face_generate( srfSurfaceFace_t *cv )
 
 	genTangSpaceDefault( &context );
 }
+
+
+
+//
+// MDV
+//
+typedef struct
+{
+	int			numSurfaces;
+	mdvVertex_t *verts;
+	vec4_t		*tangents;
+	mdvSt_t		*st;
+	glIndex_t	*indices;
+} ModelMeshData;
+
+int mikkt_mdv_GetNumVertices( const SMikkTSpaceContext *context ) 
+{
+	ModelMeshData *meshData = (ModelMeshData *)context->m_pUserData;
+	return meshData->numSurfaces;
+}
+
+void mikkt_mdv_GetPosition( const SMikkTSpaceContext *context, float *position, const int face, const int vert)
+{
+	ModelMeshData *meshData = (ModelMeshData *)context->m_pUserData;
+	const int vert_index = R_FixMikktVertIndex(vert);
+	glIndex_t idx = meshData->indices[face * 3 + vert_index];
+
+	Com_Memcpy( position, meshData->verts[idx].xyz, sizeof(float) * 3); 
+}
+
+void mikkt_mdv_GetNormal( const SMikkTSpaceContext *context, float *normal, const int face, const int vert)
+{
+	ModelMeshData *meshData = (ModelMeshData *)context->m_pUserData;
+	const int vert_index = R_FixMikktVertIndex(vert);
+	glIndex_t idx = meshData->indices[face * 3 + vert_index];
+
+	Com_Memcpy( normal, meshData->verts[idx].normal, sizeof(float) * 3); 
+}
+
+void mikkt_mdv_GetTexCoord( const SMikkTSpaceContext *context, float *st, const int face, const int vert)
+{
+	ModelMeshData *meshData = (ModelMeshData *)context->m_pUserData;
+	const int vert_index = R_FixMikktVertIndex(vert);
+	glIndex_t idx = meshData->indices[face * 3 + vert_index];
+
+	Com_Memcpy( st, meshData->st[idx].st, sizeof(float) * 2 );
+}
+
+void mikkt_mdv_SetTangent( const SMikkTSpaceContext *context, const float *tangent, const float sign, const int face, const int vert)
+{
+	ModelMeshData *meshData = (ModelMeshData *)context->m_pUserData;
+	const int vert_index = R_FixMikktVertIndex(vert);
+	glIndex_t idx = meshData->indices[face * 3 + vert_index];
+
+	vec4_t *out = meshData->tangents + idx;
+	Com_Memcpy( out, tangent, sizeof(float) * 3 );
+	(*out)[3] = sign;
+}
+
+void vk_mikkt_mdv_generate( int numSurfaces, mdvVertex_t *verts, vec4_t *tangents, mdvSt_t *st, glIndex_t *indices )
+{
+	SMikkTSpaceInterface info;
+	info.m_getNumFaces			= mikkt_mdv_GetNumVertices;
+	info.m_getNumVerticesOfFace = mikkt_bsp_face_GetNumVerticesOfFace;
+	info.m_getPosition			= mikkt_mdv_GetPosition;
+	info.m_getNormal			= mikkt_mdv_GetNormal;
+	info.m_getTexCoord			= mikkt_mdv_GetTexCoord;
+	info.m_setTSpaceBasic		= mikkt_mdv_SetTangent;
+	info.m_setTSpace			= NULL;
+
+	ModelMeshData mesh;
+	mesh.numSurfaces	= numSurfaces;
+	mesh.verts			= verts;
+	mesh.st				= st;
+	mesh.tangents		= tangents;
+	mesh.indices		= indices;
+
+	SMikkTSpaceContext context;
+	context.m_pInterface = &info;
+	context.m_pUserData = &mesh;
+
+	genTangSpaceDefault( &context );
+}
