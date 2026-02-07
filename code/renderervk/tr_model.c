@@ -101,7 +101,7 @@ static qhandle_t R_RegisterMD3(const char *name, model_t *mod)
 		for ( lod--; lod >= 0; lod-- )
 		{
 			mod->numLods++;
-			mod->md3[lod] = mod->md3[lod + 1];
+			mod->mdv[lod] = mod->mdv[lod + 1];
 		}
 
 		return mod->index;
@@ -383,6 +383,7 @@ qhandle_t RE_RegisterModel( const char *name ) {
 R_LoadMD3
 =================
 */
+#if 0
 static qboolean R_LoadMD3( model_t *mod, int lod, void *buffer, int fileSize, const char *mod_name ) {
 	int					i, j;
 	md3Header_t			*pinmodel, *hdr;
@@ -599,7 +600,492 @@ static qboolean R_LoadMD3( model_t *mod, int lod, void *buffer, int fileSize, co
 
 	return qtrue;
 }
+#else
+/*
+=============
+R_CalcTexDirs
 
+Lengyel, Eric. “Computing Tangent Space Basis Vectors for an Arbitrary Mesh”. Terathon Software 3D Graphics Library, 2001. http://www.terathon.com/code/tangent.html
+=============
+*/
+void R_CalcTexDirs(vec3_t sdir, vec3_t tdir, const vec3_t v1, const vec3_t v2,
+				   const vec3_t v3, const vec2_t w1, const vec2_t w2, const vec2_t w3)
+{
+	float			x1, x2, y1, y2, z1, z2;
+	float			s1, s2, t1, t2, r;
+
+	x1 = v2[0] - v1[0];
+	x2 = v3[0] - v1[0];
+	y1 = v2[1] - v1[1];
+	y2 = v3[1] - v1[1];
+	z1 = v2[2] - v1[2];
+	z2 = v3[2] - v1[2];
+
+	s1 = w2[0] - w1[0];
+	s2 = w3[0] - w1[0];
+	t1 = w2[1] - w1[1];
+	t2 = w3[1] - w1[1];
+
+	r = s1 * t2 - s2 * t1;
+	if (r) r = 1.0f / r;
+
+	VectorSet(sdir, (t2 * x1 - t1 * x2) * r, (t2 * y1 - t1 * y2) * r, (t2 * z1 - t1 * z2) * r);
+	VectorSet(tdir, (s1 * x2 - s2 * x1) * r, (s1 * y2 - s2 * y1) * r, (s1 * z2 - s2 * z1) * r);
+}
+
+static qboolean R_LoadMD3(model_t * mod, int lod, void *buffer, int bufferSize, const char *modName)
+{
+	int             f, i, j;
+
+	md3Header_t    *md3Model;
+	md3Frame_t     *md3Frame;
+	md3Surface_t   *md3Surf;
+	md3Shader_t    *md3Shader;
+	md3Triangle_t  *md3Tri;
+	md3St_t        *md3st;
+	md3XyzNormal_t *md3xyz;
+	md3Tag_t       *md3Tag;
+
+	mdvModel_t     *mdvModel;
+	mdvFrame_t     *frame;
+	mdvSurface_t   *surf;//, *surface;
+	int            *shaderIndex;
+	glIndex_t	   *tri;
+	mdvVertex_t    *v;
+	mdvSt_t        *st;
+	mdvTag_t       *tag;
+	mdvTagName_t   *tagName;
+
+	int             version;
+	int             size;
+
+	md3Model = (md3Header_t *) buffer;
+
+	version = LittleLong(md3Model->version);
+	if(version != MD3_VERSION)
+	{
+		ri.Printf(PRINT_WARNING, "R_LoadMD3: %s has wrong version (%i should be %i)\n", modName, version, MD3_VERSION);
+		return qfalse;
+	}
+
+	mod->type = MOD_MESH;
+	size = LittleLong(md3Model->ofsEnd);
+	mod->dataSize += size;
+	mdvModel = mod->mdv[lod] = ri.Hunk_Alloc(sizeof(mdvModel_t), h_low);
+
+//  Com_Memcpy(mod->md3[lod], buffer, LittleLong(md3Model->ofsEnd));
+
+	LL(md3Model->ident);
+	LL(md3Model->version);
+	LL(md3Model->numFrames);
+	LL(md3Model->numTags);
+	LL(md3Model->numSurfaces);
+	LL(md3Model->ofsFrames);
+	LL(md3Model->ofsTags);
+	LL(md3Model->ofsSurfaces);
+	LL(md3Model->ofsEnd);
+
+	if(md3Model->numFrames < 1)
+	{
+		ri.Printf(PRINT_WARNING, "R_LoadMD3: %s has no frames\n", modName);
+		return qfalse;
+	}
+
+	// swap all the frames
+	mdvModel->numFrames = md3Model->numFrames;
+	mdvModel->frames = frame = ri.Hunk_Alloc(sizeof(*frame) * md3Model->numFrames, h_low);
+
+	md3Frame = (md3Frame_t *) ((byte *) md3Model + md3Model->ofsFrames);
+	for(i = 0; i < md3Model->numFrames; i++, frame++, md3Frame++)
+	{
+		frame->radius = LittleFloat(md3Frame->radius);
+		for(j = 0; j < 3; j++)
+		{
+			frame->bounds[0][j] = LittleFloat(md3Frame->bounds[0][j]);
+			frame->bounds[1][j] = LittleFloat(md3Frame->bounds[1][j]);
+			frame->localOrigin[j] = LittleFloat(md3Frame->localOrigin[j]);
+		}
+	}
+
+	// swap all the tags
+	mdvModel->numTags = md3Model->numTags;
+	mdvModel->tags = tag = ri.Hunk_Alloc(sizeof(*tag) * (md3Model->numTags * md3Model->numFrames), h_low);
+
+	md3Tag = (md3Tag_t *) ((byte *) md3Model + md3Model->ofsTags);
+	for(i = 0; i < md3Model->numTags * md3Model->numFrames; i++, tag++, md3Tag++)
+	{
+		for(j = 0; j < 3; j++)
+		{
+			tag->origin[j] = LittleFloat(md3Tag->origin[j]);
+			tag->axis[0][j] = LittleFloat(md3Tag->axis[0][j]);
+			tag->axis[1][j] = LittleFloat(md3Tag->axis[1][j]);
+			tag->axis[2][j] = LittleFloat(md3Tag->axis[2][j]);
+		}
+	}
+
+
+	mdvModel->tagNames = tagName = ri.Hunk_Alloc(sizeof(*tagName) * (md3Model->numTags), h_low);
+
+	md3Tag = (md3Tag_t *) ((byte *) md3Model + md3Model->ofsTags);
+	for(i = 0; i < md3Model->numTags; i++, tagName++, md3Tag++)
+	{
+		Q_strncpyz(tagName->name, md3Tag->name, sizeof(tagName->name));
+	}
+
+	// swap all the surfaces
+	mdvModel->numSurfaces = md3Model->numSurfaces;
+	mdvModel->surfaces = surf = ri.Hunk_Alloc(sizeof(*surf) * md3Model->numSurfaces, h_low);
+
+	md3Surf = (md3Surface_t *) ((byte *) md3Model + md3Model->ofsSurfaces);
+	for(i = 0; i < md3Model->numSurfaces; i++)
+	{
+		LL(md3Surf->ident);
+		LL(md3Surf->flags);
+		LL(md3Surf->numFrames);
+		LL(md3Surf->numShaders);
+		LL(md3Surf->numTriangles);
+		LL(md3Surf->ofsTriangles);
+		LL(md3Surf->numVerts);
+		LL(md3Surf->ofsShaders);
+		LL(md3Surf->ofsSt);
+		LL(md3Surf->ofsXyzNormals);
+		LL(md3Surf->ofsEnd);
+
+		if(md3Surf->numVerts >= SHADER_MAX_VERTEXES)
+		{
+			ri.Printf(PRINT_WARNING, "R_LoadMD3: %s has more than %i verts on %s (%i).\n",
+				modName, SHADER_MAX_VERTEXES - 1, md3Surf->name[0] ? md3Surf->name : "a surface",
+				md3Surf->numVerts );
+			return qfalse;
+		}
+		if(md3Surf->numTriangles * 3 >= SHADER_MAX_INDEXES)
+		{
+			ri.Printf(PRINT_WARNING, "R_LoadMD3: %s has more than %i triangles on %s (%i).\n",
+				modName, ( SHADER_MAX_INDEXES / 3 ) - 1, md3Surf->name[0] ? md3Surf->name : "a surface",
+				md3Surf->numTriangles );
+			return qfalse;
+		}
+
+		// change to surface identifier
+		surf->surfaceType = SF_MDV;
+
+		// give pointer to model for Tess_SurfaceMDX
+		surf->model = mdvModel;
+
+		// copy surface name
+		Q_strncpyz(surf->name, md3Surf->name, sizeof(surf->name));
+
+		// lowercase the surface name so skin compares are faster
+		Q_strlwr(surf->name);
+
+		// strip off a trailing _1 or _2
+		// this is a crutch for q3data being a mess
+		j = strlen(surf->name);
+		if(j > 2 && surf->name[j - 2] == '_')
+		{
+			surf->name[j - 2] = 0;
+		}
+
+		// register the shaders
+		surf->numShaderIndexes = md3Surf->numShaders;
+		surf->shaderIndexes = shaderIndex = ri.Hunk_Alloc(sizeof(*shaderIndex) * md3Surf->numShaders, h_low);
+
+		md3Shader = (md3Shader_t *) ((byte *) md3Surf + md3Surf->ofsShaders);
+		for(j = 0; j < md3Surf->numShaders; j++, shaderIndex++, md3Shader++)
+		{
+			shader_t       *sh;
+
+			sh = R_FindShader(md3Shader->name, LIGHTMAP_NONE, qtrue);
+			if(sh->defaultShader)
+			{
+				*shaderIndex = 0;
+			}
+			else
+			{
+				*shaderIndex = sh->index;
+			}
+		}
+
+		// swap all the triangles
+		surf->numIndexes = md3Surf->numTriangles * 3;
+		surf->indexes = tri = ri.Hunk_Alloc(sizeof(*tri) * 3 * md3Surf->numTriangles, h_low);
+
+		md3Tri = (md3Triangle_t *) ((byte *) md3Surf + md3Surf->ofsTriangles);
+		for(j = 0; j < md3Surf->numTriangles; j++, tri += 3, md3Tri++)
+		{
+			tri[0] = LittleLong(md3Tri->indexes[0]);
+			tri[1] = LittleLong(md3Tri->indexes[1]);
+			tri[2] = LittleLong(md3Tri->indexes[2]);
+		}
+
+		// swap all the XyzNormals
+		surf->numVerts = md3Surf->numVerts;
+		surf->verts = v = ri.Hunk_Alloc(sizeof(*v) * (md3Surf->numVerts * md3Surf->numFrames), h_low);
+
+		md3xyz = (md3XyzNormal_t *) ((byte *) md3Surf + md3Surf->ofsXyzNormals);
+		for(j = 0; j < md3Surf->numVerts * md3Surf->numFrames; j++, md3xyz++, v++)
+		{
+			unsigned lat, lng;
+			unsigned short normal;
+			vec3_t fNormal;
+
+			v->xyz[0] = LittleShort(md3xyz->xyz[0]) * MD3_XYZ_SCALE;
+			v->xyz[1] = LittleShort(md3xyz->xyz[1]) * MD3_XYZ_SCALE;
+			v->xyz[2] = LittleShort(md3xyz->xyz[2]) * MD3_XYZ_SCALE;
+
+			normal = LittleShort(md3xyz->normal);
+
+			lat = ( normal >> 8 ) & 0xff;
+			lng = ( normal & 0xff );
+			lat *= (FUNCTABLE_SIZE/256);
+			lng *= (FUNCTABLE_SIZE/256);
+
+			// decode X as cos( lat ) * sin( long )
+			// decode Y as sin( lat ) * sin( long )
+			// decode Z as cos( long )
+
+			fNormal[0] = tr.sinTable[(lat+(FUNCTABLE_SIZE/4))&FUNCTABLE_MASK] * tr.sinTable[lng];
+			fNormal[1] = tr.sinTable[lat] * tr.sinTable[lng];
+			fNormal[2] = tr.sinTable[(lng+(FUNCTABLE_SIZE/4))&FUNCTABLE_MASK];
+
+			v->normal[0] = fNormal[0];
+			v->normal[1] = fNormal[1];
+			v->normal[2] = fNormal[2];
+			v->normal[3] = 1.0;
+			//R_VaoPackNormal(v->normal, fNormal);
+		}
+
+		// swap all the ST
+		surf->st = st = ri.Hunk_Alloc(sizeof(*st) * md3Surf->numVerts, h_low);
+
+		md3st = (md3St_t *) ((byte *) md3Surf + md3Surf->ofsSt);
+		for(j = 0; j < md3Surf->numVerts; j++, md3st++, st++)
+		{
+			st->st[0] = LittleFloat(md3st->st[0]);
+			st->st[1] = LittleFloat(md3st->st[1]);
+		}
+
+		// calc tangent spaces
+		{
+			vec3_t *sdirs = ri.Malloc(sizeof(*sdirs) * surf->numVerts * mdvModel->numFrames);
+			vec3_t *tdirs = ri.Malloc(sizeof(*tdirs) * surf->numVerts * mdvModel->numFrames);
+
+			for(j = 0, v = surf->verts; j < (surf->numVerts * mdvModel->numFrames); j++, v++)
+			{
+				VectorClear(sdirs[j]);
+				VectorClear(tdirs[j]);
+			}
+
+			for(f = 0; f < mdvModel->numFrames; f++)
+			{
+				for(j = 0, tri = surf->indexes; j < surf->numIndexes; j += 3, tri += 3)
+				{
+					vec3_t sdir, tdir;
+					const float *v0, *v1, *v2, *t0, *t1, *t2;
+					glIndex_t index0, index1, index2;
+
+					index0 = surf->numVerts * f + tri[0];
+					index1 = surf->numVerts * f + tri[1];
+					index2 = surf->numVerts * f + tri[2];
+
+					v0 = surf->verts[index0].xyz;
+					v1 = surf->verts[index1].xyz;
+					v2 = surf->verts[index2].xyz;
+
+					t0 = surf->st[tri[0]].st;
+					t1 = surf->st[tri[1]].st;
+					t2 = surf->st[tri[2]].st;
+
+					R_CalcTexDirs(sdir, tdir, v0, v1, v2, t0, t1, t2);
+
+					VectorAdd(sdir, sdirs[index0], sdirs[index0]);
+					VectorAdd(sdir, sdirs[index1], sdirs[index1]);
+					VectorAdd(sdir, sdirs[index2], sdirs[index2]);
+					VectorAdd(tdir, tdirs[index0], tdirs[index0]);
+					VectorAdd(tdir, tdirs[index1], tdirs[index1]);
+					VectorAdd(tdir, tdirs[index2], tdirs[index2]);
+				}
+			}
+
+			for(j = 0, v = surf->verts; j < (surf->numVerts * mdvModel->numFrames); j++, v++)
+			{
+				vec3_t normal;
+				vec4_t tangent;
+
+				VectorNormalize(sdirs[j]);
+				VectorNormalize(tdirs[j]);
+
+				//R_VaoUnpackNormal(normal, v->normal);
+
+				//tangent[3] = R_CalcTangentSpace(tangent, NULL, normal, sdirs[j], tdirs[j]);
+
+				//R_VaoPackTangent(v->tangent, tangent);
+				v->tangent[0] = 1.0;
+				v->tangent[1] = 0.0;
+				v->tangent[2] = 0.0;
+				v->normal[3] = 1.0;
+			}
+
+			ri.Free(sdirs);
+			ri.Free(tdirs);
+		}
+
+		// find the next surface
+		md3Surf = (md3Surface_t *) ((byte *) md3Surf + md3Surf->ofsEnd);
+		surf++;
+	}
+
+#if 0
+	{
+		srfVaoMdvMesh_t *vaoSurf;
+
+		mdvModel->numVaoSurfaces = mdvModel->numSurfaces;
+		mdvModel->vaoSurfaces = ri.Hunk_Alloc(sizeof(*mdvModel->vaoSurfaces) * mdvModel->numSurfaces, h_low);
+
+		vaoSurf = mdvModel->vaoSurfaces;
+		surf = mdvModel->surfaces;
+		for (i = 0; i < mdvModel->numSurfaces; i++, vaoSurf++, surf++)
+		{
+			uint32_t offset_xyz, offset_st, offset_normal, offset_tangent;
+			uint32_t stride_xyz, stride_st, stride_normal, stride_tangent;
+			uint32_t dataSize, dataOfs;
+			uint8_t *data;
+
+			if (mdvModel->numFrames > 1)
+			{
+				// vertex animation, store texcoords first, then position/normal/tangents
+				offset_st      = 0;
+				offset_xyz     = surf->numVerts * sizeof(vec2_t);
+				offset_normal  = offset_xyz + sizeof(vec3_t);
+				offset_tangent = offset_normal + sizeof(int16_t) * 4;
+				stride_st  = sizeof(vec2_t);
+				stride_xyz = sizeof(vec3_t) + sizeof(int16_t) * 4;
+				stride_xyz += sizeof(int16_t) * 4;
+				stride_normal = stride_tangent = stride_xyz;
+
+				dataSize = offset_xyz + surf->numVerts * mdvModel->numFrames * stride_xyz;
+			}
+			else
+			{
+				// no animation, interleave everything
+				offset_xyz     = 0;
+				offset_st      = offset_xyz + sizeof(vec3_t);
+				offset_normal  = offset_st + sizeof(vec2_t);
+				offset_tangent = offset_normal + sizeof(int16_t) * 4;
+				stride_xyz = offset_tangent + sizeof(int16_t) * 4;
+				stride_st = stride_normal = stride_tangent = stride_xyz;
+
+				dataSize = surf->numVerts * stride_xyz;
+			}
+
+
+			data = ri.Malloc(dataSize);
+			dataOfs = 0;
+
+			if (mdvModel->numFrames > 1)
+			{
+				st = surf->st;
+				for ( j = 0 ; j < surf->numVerts ; j++, st++ ) {
+					memcpy(data + dataOfs, &st->st, sizeof(vec2_t));
+					dataOfs += sizeof(st->st);
+				}
+
+				v = surf->verts;
+				for ( j = 0; j < surf->numVerts * mdvModel->numFrames ; j++, v++ )
+				{
+					// xyz
+					memcpy(data + dataOfs, &v->xyz, sizeof(vec3_t));
+					dataOfs += sizeof(vec3_t);
+
+					// normal
+					memcpy(data + dataOfs, &v->normal, sizeof(int16_t) * 4);
+					dataOfs += sizeof(int16_t) * 4;
+
+					// tangent
+					memcpy(data + dataOfs, &v->tangent, sizeof(int16_t) * 4);
+					dataOfs += sizeof(int16_t) * 4;
+				}
+			}
+			else
+			{
+				v = surf->verts;
+				st = surf->st;
+				for ( j = 0; j < surf->numVerts; j++, v++, st++ )
+				{
+					// xyz
+					memcpy(data + dataOfs, &v->xyz, sizeof(vec3_t));
+					dataOfs += sizeof(v->xyz);
+
+					// st
+					memcpy(data + dataOfs, &st->st, sizeof(vec2_t));
+					dataOfs += sizeof(st->st);
+
+					// normal
+					memcpy(data + dataOfs, &v->normal, sizeof(int16_t) * 4);
+					dataOfs += sizeof(int16_t) * 4;
+
+					// tangent
+					memcpy(data + dataOfs, &v->tangent, sizeof(int16_t) * 4);
+					dataOfs += sizeof(int16_t) * 4;
+				}
+			}
+
+			vaoSurf->surfaceType = SF_VAO_MDVMESH;
+			vaoSurf->mdvModel = mdvModel;
+			vaoSurf->mdvSurface = surf;
+			vaoSurf->numIndexes = surf->numIndexes;
+			vaoSurf->numVerts = surf->numVerts;
+			
+			vaoSurf->vao = R_CreateVao(va("staticMD3Mesh_VAO '%s'", surf->name), data, dataSize, (byte *)surf->indexes, surf->numIndexes * sizeof(*surf->indexes), VAO_USAGE_STATIC);
+
+			vaoSurf->vao->attribs[ATTR_INDEX_POSITION].enabled = 1;
+			vaoSurf->vao->attribs[ATTR_INDEX_TEXCOORD].enabled = 1;
+			vaoSurf->vao->attribs[ATTR_INDEX_NORMAL  ].enabled = 1;
+			vaoSurf->vao->attribs[ATTR_INDEX_TANGENT ].enabled = 1;
+
+			vaoSurf->vao->attribs[ATTR_INDEX_POSITION].count = 3;
+			vaoSurf->vao->attribs[ATTR_INDEX_TEXCOORD].count = 2;
+			vaoSurf->vao->attribs[ATTR_INDEX_NORMAL  ].count = 4;
+			vaoSurf->vao->attribs[ATTR_INDEX_TANGENT ].count = 4;
+
+			vaoSurf->vao->attribs[ATTR_INDEX_POSITION].type = GL_FLOAT;
+			vaoSurf->vao->attribs[ATTR_INDEX_TEXCOORD].type = GL_FLOAT;
+			vaoSurf->vao->attribs[ATTR_INDEX_NORMAL  ].type = GL_SHORT;
+			vaoSurf->vao->attribs[ATTR_INDEX_TANGENT ].type = GL_SHORT;
+
+			vaoSurf->vao->attribs[ATTR_INDEX_POSITION].normalized = GL_FALSE;
+			vaoSurf->vao->attribs[ATTR_INDEX_TEXCOORD].normalized = GL_FALSE;
+			vaoSurf->vao->attribs[ATTR_INDEX_NORMAL  ].normalized = GL_TRUE;
+			vaoSurf->vao->attribs[ATTR_INDEX_TANGENT ].normalized = GL_TRUE;
+
+			vaoSurf->vao->attribs[ATTR_INDEX_POSITION].offset = offset_xyz;
+			vaoSurf->vao->attribs[ATTR_INDEX_TEXCOORD].offset = offset_st;
+			vaoSurf->vao->attribs[ATTR_INDEX_NORMAL  ].offset = offset_normal;
+			vaoSurf->vao->attribs[ATTR_INDEX_TANGENT ].offset = offset_tangent;
+
+			vaoSurf->vao->attribs[ATTR_INDEX_POSITION].stride = stride_xyz;
+			vaoSurf->vao->attribs[ATTR_INDEX_TEXCOORD].stride = stride_st;
+			vaoSurf->vao->attribs[ATTR_INDEX_NORMAL  ].stride = stride_normal;
+			vaoSurf->vao->attribs[ATTR_INDEX_TANGENT ].stride = stride_tangent;
+
+			if (mdvModel->numFrames > 1)
+			{
+				vaoSurf->vao->attribs[ATTR_INDEX_POSITION2] = vaoSurf->vao->attribs[ATTR_INDEX_POSITION];
+				vaoSurf->vao->attribs[ATTR_INDEX_NORMAL2  ] = vaoSurf->vao->attribs[ATTR_INDEX_NORMAL  ];
+				vaoSurf->vao->attribs[ATTR_INDEX_TANGENT2 ] = vaoSurf->vao->attribs[ATTR_INDEX_TANGENT ];
+
+				vaoSurf->vao->frameSize = stride_xyz    * surf->numVerts;
+			}
+
+			Vao_SetVertexPointers(vaoSurf->vao);
+
+			ri.Free(data);
+		}
+	}
+#endif
+	return qtrue;
+}
+#endif
 
 /*
 =================
@@ -997,7 +1483,7 @@ void R_Modellist_f( void ) {
 		mod = tr.models[i];
 		lods = 1;
 		for ( j = 1 ; j < MD3_MAX_LODS ; j++ ) {
-			if ( mod->md3[j] && mod->md3[j] != mod->md3[j-1] ) {
+			if ( mod->mdv[j] && mod->mdv[j] != mod->mdv[j-1] ) {
 				lods++;
 			}
 		}
@@ -1022,26 +1508,30 @@ void R_Modellist_f( void ) {
 R_GetTag
 ================
 */
-static md3Tag_t *R_GetTag( md3Header_t *mod, int frame, const char *tagName ) {
-	md3Tag_t		*tag;
-	int				i;
+static mdvTag_t *R_GetTag( mdvModel_t *mod, int frame, const char *_tagName ) {
+	int             i;
+	mdvTag_t       *tag;
+	mdvTagName_t   *tagName;
 
 	if ( frame >= mod->numFrames ) {
 		// it is possible to have a bad frame while changing models, so don't error
 		frame = mod->numFrames - 1;
 	}
 
-	tag = (md3Tag_t *)((byte *)mod + mod->ofsTags) + frame * mod->numTags;
-	for ( i = 0 ; i < mod->numTags ; i++, tag++ ) {
-		if ( !strcmp( tag->name, tagName ) ) {
-			return tag;	// found it
+	tag = mod->tags + frame * mod->numTags;
+	tagName = mod->tagNames;
+	for(i = 0; i < mod->numTags; i++, tag++, tagName++)
+	{
+		if(!strcmp(tagName->name, _tagName))
+		{
+			return tag;
 		}
 	}
 
 	return NULL;
 }
 
-static md3Tag_t *R_GetAnimTag( mdrHeader_t *mod, int framenum, const char *tagName, md3Tag_t * dest) 
+static mdvTag_t *R_GetAnimTag( mdrHeader_t *mod, int framenum, const char *tagName, mdvTag_t * dest) 
 {
 	int				i, j, k;
 	int				frameSize;
@@ -1059,7 +1549,7 @@ static md3Tag_t *R_GetAnimTag( mdrHeader_t *mod, int framenum, const char *tagNa
 	{
 		if ( !strcmp( tag->name, tagName ) )
 		{
-			Q_strncpyz(dest->name, tag->name, sizeof(dest->name));
+			//Q_strncpyz(dest->name, tag->name, sizeof(dest->name));
 
 			// uncompressed model...
 			//
@@ -1090,14 +1580,14 @@ R_LerpTag
 */
 int R_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, int endFrame, 
 					 float frac, const char *tagName ) {
-	md3Tag_t	*start, *end;
-	md3Tag_t	start_space, end_space;
+	mdvTag_t	*start, *end;
+	mdvTag_t	start_space, end_space;
 	int		i;
 	float		frontLerp, backLerp;
 	model_t		*model;
 
 	model = R_GetModelByHandle( handle );
-	if ( !model->md3[0] )
+	if ( !model->mdv[0] )
 	{
 		if(model->type == MOD_MDR)
 		{
@@ -1114,8 +1604,8 @@ int R_LerpTag( orientation_t *tag, qhandle_t handle, int startFrame, int endFram
 	}
 	else
 	{
-		start = R_GetTag( model->md3[0], startFrame, tagName );
-		end = R_GetTag( model->md3[0], endFrame, tagName );
+		start = R_GetTag( model->mdv[0], startFrame, tagName );
+		end = R_GetTag( model->mdv[0], endFrame, tagName );
 	}
 
 	if ( !start || !end ) {
@@ -1156,11 +1646,11 @@ void R_ModelBounds( qhandle_t handle, vec3_t mins, vec3_t maxs ) {
 		
 		return;
 	} else if (model->type == MOD_MESH) {
-		md3Header_t	*header;
-		md3Frame_t	*frame;
+		mdvModel_t	*header;
+		mdvFrame_t	*frame;
 
-		header = model->md3[0];
-		frame = (md3Frame_t *) ((byte *)header + header->ofsFrames);
+		header = model->mdv[0];
+		frame = header->frames;
 
 		VectorCopy( frame->bounds[0], mins );
 		VectorCopy( frame->bounds[1], maxs );

@@ -1270,6 +1270,8 @@ void RB_IQMSurfaceAnim( const surfaceType_t *surface ) {
 	float		*outTexCoord;
 	color4ub_t	*outColor;
 
+
+
 	int	frame = data->num_frames ? backEnd.currentEntity->e.frame % data->num_frames : 0;
 	int	oldframe = data->num_frames ? backEnd.currentEntity->e.oldframe % data->num_frames : 0;
 	float	backlerp = backEnd.currentEntity->e.backlerp;
@@ -1294,6 +1296,15 @@ void RB_IQMSurfaceAnim( const surfaceType_t *surface ) {
 	outNormal = &tess.normal[tess.numVertexes];
 	outTexCoord = &tess.texCoords[0][tess.numVertexes][0];
 	outColor = &tess.vertexColors[tess.numVertexes];
+
+#ifdef USE_VK_PBR
+	float		*tangent;
+	vec4_t		*outTangent;
+
+	tangent = &data->tangents[surf->first_vertex * 4];
+	outTangent = &tess.qtangent[tess.numVertexes];
+#endif
+
 
 	if ( data->num_poses > 0 ) {
 		// compute interpolated joint matrices
@@ -1421,6 +1432,16 @@ void RB_IQMSurfaceAnim( const surfaceType_t *surface ) {
 				nrmMat[ 6] * normal[0] +
 				nrmMat[ 7] * normal[1] +
 				nrmMat[ 8] * normal[2];
+
+#ifdef USE_VK_PBR
+			(*outTangent)[0] = DotProduct(&nrmMat[0], tangent);
+			(*outTangent)[1] = DotProduct(&nrmMat[3], tangent);
+			(*outTangent)[2] = DotProduct(&nrmMat[6], tangent);
+			(*outTangent)[3] = tangent[3];
+
+			tangent		+= 4;
+			outTangent	+= 4;
+#endif
 		}
 	} else {
 		// copy vertexes and fill other data
@@ -1437,6 +1458,18 @@ void RB_IQMSurfaceAnim( const surfaceType_t *surface ) {
 			(*outNormal)[0] = normal[0];
 			(*outNormal)[1] = normal[1];
 			(*outNormal)[2] = normal[2];
+
+#ifdef USE_VK_PBR
+			(*outTangent)[0] = tangent[0];
+			(*outTangent)[1] = tangent[1];
+			(*outTangent)[2] = tangent[2];
+			(*outTangent)[3] = tangent[3];
+			// or jsut Com_Memcpy
+
+
+			tangent		+= 4;
+			outTangent	+= 4;
+#endif
 		}
 	}
 

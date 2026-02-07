@@ -733,7 +733,11 @@ typedef enum {
 	SF_GRID,
 	SF_TRIANGLES,
 	SF_POLY,
+#if 0
 	SF_MD3,
+#else
+	SF_MDV,
+#endif
 	SF_MDR,
 	SF_IQM,
 	SF_FLARE,
@@ -1025,6 +1029,78 @@ typedef struct {
 
 //======================================================================
 
+/*
+==============================================================================
+MDV MODELS - meta format for vertex animation models like .md2, .md3, .mdc
+==============================================================================
+*/
+typedef struct
+{
+	float           bounds[2][3];
+	float           localOrigin[3];
+	float           radius;
+} mdvFrame_t;
+
+typedef struct
+{
+	float           origin[3];
+	float           axis[3][3];
+} mdvTag_t;
+
+typedef struct
+{
+	char            name[MAX_QPATH];	// tag name
+} mdvTagName_t;
+
+typedef struct
+{
+	vec3_t          xyz;
+	vec4_t          normal;
+	vec4_t          tangent;
+} mdvVertex_t;
+
+typedef struct
+{
+	float           st[2];
+} mdvSt_t;
+
+typedef struct mdvSurface_s
+{
+	surfaceType_t   surfaceType;
+
+	char            name[MAX_QPATH];	// polyset name
+
+	int             numShaderIndexes;
+	int				*shaderIndexes;
+
+	int             numVerts;
+	mdvVertex_t    *verts;
+	mdvSt_t        *st;
+
+	int             numIndexes;
+	glIndex_t      *indexes;
+
+	struct mdvModel_s *model;
+} mdvSurface_t;
+
+typedef struct mdvModel_s
+{
+	int             numFrames;
+	mdvFrame_t     *frames;
+
+	int             numTags;
+	mdvTag_t       *tags;
+	mdvTagName_t   *tagNames;
+
+	int             numSurfaces;
+	mdvSurface_t   *surfaces;
+#if 0
+	int             numVaoSurfaces;
+	srfVaoMdvMesh_t  *vaoSurfaces;
+#endif
+	int             numSkins;
+} mdvModel_t;
+
 typedef enum {
 	MOD_BAD,
 	MOD_BRUSH,
@@ -1040,7 +1116,8 @@ typedef struct model_s {
 
 	int			dataSize;	// just for listing purposes
 	bmodel_t	*bmodel;		// only if type == MOD_BRUSH
-	md3Header_t	*md3[MD3_MAX_LODS];	// only if type == MOD_MESH
+	//md3Header_t	*md3[MD3_MAX_LODS];	// only if type == MOD_MESH
+	mdvModel_t	*mdv[MD3_MAX_LODS];	// only if type == MOD_MESH
 	void	*modelData;			// only if type == (MOD_MDR | MOD_IQM)
 
 	int			 numLods;

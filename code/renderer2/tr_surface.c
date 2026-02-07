@@ -774,7 +774,7 @@ static void RB_SurfaceLightningBolt( void ) {
 static void LerpMeshVertexes(const mdvSurface_t *surf, float backlerp)
 {
 	float *outXyz;
-	int16_t *outNormal, *outTangent;
+	float *outNormal, *outTangent;
 	mdvVertex_t *newVerts;
 	int		vertNum;
 
