@@ -43,6 +43,9 @@ typedef enum
 	IMGFLAG_NOSCALE        = 0x0100,
 	IMGFLAG_RGB            = 0x0200,
 	IMGFLAG_COLORSHIFT     = 0x0400,
+#ifdef VK_COMPUTE_NORMALMAP
+	IMGFLAG_STORAGE			= 0x0800,
+#endif
 } imgFlags_t;
 
 typedef enum {

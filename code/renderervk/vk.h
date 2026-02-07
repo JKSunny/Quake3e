@@ -503,6 +503,12 @@ typedef struct {
 	VkDescriptorSetLayout set_layout_uniform;	// dynamic uniform buffer
 	VkDescriptorSetLayout set_layout_storage;	// feedback buffer
 
+#ifdef VK_COMPUTE_NORMALMAP
+	VkDescriptorSetLayout	set_layout_compute_normalmap;
+	VkPipelineLayout		pipeline_layout_compute_normalmap;
+	VkPipeline				compute_normalmap_pipeline;
+#endif
+
 	VkPipelineLayout pipeline_layout;			// default shaders
 	VkPipelineLayout pipeline_layout_storage;	// flare test shader layout
 	VkPipelineLayout pipeline_layout_post_process;	// post-processing
@@ -671,6 +677,10 @@ typedef struct {
 		VkShaderModule filtercube_gm;
 		VkShaderModule irradiancecube_fs;
 		VkShaderModule prefilterenvmap_fs;
+
+#ifdef VK_COMPUTE_NORMALMAP
+		VkShaderModule normalmap;
+#endif
 	} modules;
 
 	VkPipelineCache pipelineCache;

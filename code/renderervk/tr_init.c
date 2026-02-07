@@ -94,6 +94,9 @@ cvar_t  *r_baseSpecular;
 #ifdef VK_CUBEMAP
 cvar_t	*r_cubeMapping;
 #endif
+#ifdef VK_COMPUTE_NORMALMAP
+cvar_t	*r_genNormalMaps;
+#endif
 #ifdef HDR_DELUXE_LIGHTMAP
 cvar_t	*r_deluxeMapping;
 cvar_t	*r_deluxeSpecular;
@@ -1577,7 +1580,11 @@ static void R_Register( void )
 #ifdef VK_CUBEMAP
 	r_cubeMapping = ri.Cvar_Get( "r_cubeMapping", "0", CVAR_ARCHIVE | CVAR_LATCH );
 #endif
-	#ifdef HDR_DELUXE_LIGHTMAP
+#ifdef VK_COMPUTE_NORMALMAP
+	r_genNormalMaps = ri.Cvar_Get("r_genNormalMaps",	"0", CVAR_ARCHIVE | CVAR_LATCH );
+	ri.Cvar_SetDescription( r_genNormalMaps, "Approximate normal maps from baked diffuse (albedo) textures" );
+#endif
+#ifdef HDR_DELUXE_LIGHTMAP
 	r_deluxeMapping		= ri.Cvar_Get("r_deluxeMapping",	"1", CVAR_ARCHIVE );
 	ri.Cvar_SetDescription( r_deluxeMapping, "Reading deluxemaps when compiled with q3map2:\n 0: off (approximated from lightgrid)\n 1: on (compiled deluxemaps)" );
 	r_deluxeSpecular	= ri.Cvar_Get("r_deluxeSpecular",	"1", CVAR_ARCHIVE );

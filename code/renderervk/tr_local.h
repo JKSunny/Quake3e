@@ -29,10 +29,15 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #ifdef USE_VK_PBR
 	#define VK_PBR_BRDFLUT		// for inspecting codebase, does not toggle brdflut. 
 	#define VK_CUBEMAP	
+	#define VK_COMPUTE_NORMALMAP	
 
 	#ifdef VK_CUBEMAP
 		#define REF_CUBEMAP_IRRADIANCE_SIZE		64
 		#define REF_CUBEMAP_SIZE				256
+	#endif
+
+	#ifdef VK_COMPUTE_NORMALMAP
+		#define MAX_BATCH_COMPUTE_NORMALMAPS 1024
 	#endif
 #endif
 
@@ -611,6 +616,9 @@ typedef struct image_s {
 	// Descriptor set that contains single descriptor used to access the given image.
 	// It is updated only once during image initialization.
 	VkDescriptorSet descriptor;
+#ifdef USE_VK_PBR
+	uint32_t	mipLevels;		// gl texture binding
+#endif
 #else
 	GLuint		texnum;				// gl texture binding
 	GLint		internalFormat;
@@ -626,6 +634,13 @@ typedef struct cubemap_s {
 	image_t		*prefiltered_image;
 	image_t		*irradiance_image;
 } cubemap_t;
+
+#ifdef VK_COMPUTE_NORMALMAP
+typedef struct {
+	image_t* normal;
+	VkDescriptorSet descriptor_set;
+} comp_normalmap_item_t;
+#endif
 
 //=================================================================================
 
@@ -1234,7 +1249,10 @@ typedef struct {
 #ifdef USE_PMLIGHT
 	int						lightCount;		// incremented for each dlight in the view
 #endif
-
+#ifdef VK_COMPUTE_NORMALMAP
+	comp_normalmap_item_t	compute_normalmaps[MAX_BATCH_COMPUTE_NORMALMAPS];
+	uint32_t				compute_normalmaps_batch_num;
+#endif
 	int						frameSceneNum;	// zeroed at RE_BeginFrame
 
 	qboolean				worldMapLoaded;
@@ -1412,6 +1430,9 @@ extern cvar_t	*r_baseParallax;
 extern cvar_t	*r_baseSpecular;
 #ifdef VK_CUBEMAP
 extern cvar_t	*r_cubeMapping;
+#endif
+#ifdef VK_COMPUTE_NORMALMAP
+extern cvar_t	*r_genNormalMaps;
 #endif
 #ifdef HDR_DELUXE_LIGHTMAP
 extern cvar_t	*r_deluxeMapping;
@@ -2099,6 +2120,13 @@ void RE_VertexLighting( qboolean allowed );
 // mikktspace
 void		vk_mikkt_bsp_tri_generate( srfTriangles_t *tri );
 void		vk_mikkt_bsp_face_generate( srfSurfaceFace_t *face );
+
+#ifdef VK_COMPUTE_NORMALMAP
+// compute normalmap
+void		vk_create_compute_normalmap_pipelines( void );
+void		vk_dispatch_compute_normalmaps( void );
+void		vk_add_compute_normalmap( shaderStage_t *stage, image_t *albedo, imgFlags_t flags );
+#endif
 
 void		R_AddConvolveCubemapCmd( cubemap_t *cubemap , int cubemapId );
 void		vk_generate_cubemaps( cubemap_t *cube );

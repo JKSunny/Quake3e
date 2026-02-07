@@ -793,7 +793,9 @@ static void upload_vk_image( image_t *image, byte *pic ) {
 	image->uploadWidth = w;
 	image->uploadHeight = h;
 	image->layers = 1;
-
+#ifdef USE_VK_PBR
+	image->mipLevels = upload_data.mip_levels;
+#endif
 	vk_create_image( image, w, h, upload_data.mip_levels );
 	vk_upload_image_data( image, 0, 0, w, h, upload_data.mip_levels, upload_data.buffer, upload_data.buffer_size, qfalse );
 
