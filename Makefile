@@ -939,6 +939,7 @@ Q3RENDVOBJ = \
   $(B)/rendv/vk_flares.o \
   $(B)/rendv/vk_vbo.o \
   $(B)/rendv/vk_mikktspace.o \
+  $(B)/rendv/utils/mikktspace/mikktspace.o \
 
 ifneq ($(USE_RENDERER_DLOPEN), 0)
   Q3RENDVOBJ += \
