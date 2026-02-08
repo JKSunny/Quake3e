@@ -333,7 +333,7 @@ void R_AddMD3Surfaces( trRefEntity_t *ent ) {
 	// cull the entire model if merged bounding box of both frames
 	// is outside the view frustum.
 	//
-	cull = R_CullModel( model, ent, bounds );
+	cull = R_CullModel( model, ent );
 	if ( cull == CULL_OUT ) {
 		return;
 	}
