@@ -44,7 +44,15 @@ layout(set = 0, binding = 0) uniform UBO {
 #endif
 
 #if defined(PER_PIXEL_LIGHTING) || defined(USE_LIGHT_VECTOR)
-	layout(set = 0, binding = 2) uniform Global {
+	layout(set = 0, binding = 2) uniform Entity {
+		vec4 u_ambientLight;
+		vec4 u_directedLight;
+		vec4 u_LocalLightOrigin;
+		vec4 u_localViewOrigin;
+		mat4 u_ModelMatrix;
+	};
+
+	layout(set = 0, binding = 3) uniform Global {
 		vec4				u_SpecularScale;	
 		vec4				u_NormalScale;	
 	};	
@@ -139,6 +147,7 @@ layout (constant_id = 10) const int acff = 0; // NONE, RGB, RGBA, ALPHA
 	layout (constant_id = 13) const int env_texture_set = 0;
 	layout (constant_id = 14) const int deluxe_mapping			= -1; // -1: deluxemapping off, 0: on, 1: on + bound
 	layout (constant_id = 15) const float deluxe_specular_scale = 1.0;
+	layout (constant_id = 16) const int lightmap_stage = -1;
 #endif
 
 #ifdef USE_ATEST
@@ -243,6 +252,25 @@ float CorrectAlpha(float threshold, float alpha, vec2 tc)
 
 		//cubeLightColor *= cubeLightColor;
 		return cubeLightColor * (specular.rgb * EnvBRDF.x + EnvBRDF.y);
+	}
+#endif
+
+#if defined(USE_FOG)
+	void apply_acff( inout vec4 color, in vec4 fog )
+	{
+		if ( acff == 1 ) {
+			// ACFF_RGB
+			color.rgb = color.rgb * (1.0 - fog.w);
+		} else if ( acff == 2 ) {
+			// ACFF_RGBA
+			color = color * (1.0 - fog.w);
+		} else if ( acff == 3 ) {
+			// ACFF_ALPHA
+			color.a = color.a * (1.0 - fog.w);
+		} else {
+			// default: ACFF_NONE
+			color = mix( color, fog * fogColor, fog.a );
+		}
 	}
 #endif
 
@@ -613,20 +641,8 @@ void main() {
 	base = color0;
 #endif
 
-#ifdef USE_FOG
-	if ( acff == 1 ) {
-		// ACFF_RGB
-		base.rgb = base.rgb * (1.0 - fog.w);
-	} else if ( acff == 2 ) {
-		// ACFF_RGBA
-		base = base * (1.0 - fog.w);
-	} else if ( acff == 3 ) {
-		// ACFF_ALPHA
-		base.a = base.a * (1.0 - fog.w);
-	} else {
-		// default: ACFF_NONE
-		base = mix( base, fog * fogColor, fog.a );
-	}
+#if defined(USE_FOG) && !defined(PER_PIXEL_LIGHTING)
+	apply_acff( base, fog );
 #endif
 
 	if ( discard_mode == 1 ) {
@@ -652,9 +668,39 @@ void main() {
 
 		L = var_LightDir.xyz;
 
+		// aparently lightmap is not always in bundle 1 ..
+		// hotfix swap for now
+		vec2 color_tex_coord = frag_tex_coord0;
+
+		#if defined(USE_LIGHTMAP) && defined(USE_TX_BOTH)
+			vec2 lm_tex_coord;
+			vec3 lightmap_color;
+			vec4 diffuse_color;
+
+			if ( lightmap_stage > -1 ) 
+			{
+				if ( lightmap_stage == 0 ) 
+				{
+					lm_tex_coord		= frag_tex_coord0;
+					color_tex_coord		= frag_tex_coord1;
+
+					lightmap_color		= texture(texture0, lm_tex_coord).rgb;
+					diffuse_color		= texture(texture1, color_tex_coord);
+				}
+				else 
+				{
+					lm_tex_coord		= frag_tex_coord1;
+					color_tex_coord		= frag_tex_coord0;
+
+					lightmap_color		= texture(texture1, lm_tex_coord).rgb;
+					diffuse_color		= texture(texture0, color_tex_coord);
+				}
+			}
+		#endif
+
 		#if defined(USE_LIGHTMAP) && defined(USE_TX_BOTH)
 			if ( deluxe_mapping > 0 )
-				L = ( texture(deluxe_texture, frag_tex_coord1).rgb - vec3(0.5) );
+				L = ( texture(deluxe_texture, lm_tex_coord).rgb - vec3(0.5) );
 		#endif
 
 		float sqrLightDist = dot(L, L);
@@ -673,20 +719,21 @@ void main() {
 
 		//#if ( defined(USE_TX1) || defined(USE_TX2) )
 		#if defined(USE_LIGHTMAP) && defined(USE_TX_BOTH)
-			vec3 lightmapColor = texture(texture1, frag_tex_coord1).rgb;
+			vec3 lightmapColor = lightmap_color.rgb;
 			lightColor = lightmapColor * bias_color;
-			diffuse = color0;
+			//diffuse = color0;
+			diffuse = diffuse_color;
 			ambientColor = vec3 (0.0);
 			attenuation = 1.0;
 		#elif defined(USE_LIGHT_VECTOR)
-			lightColor = bias_color;
+			lightColor = u_directedLight.rgb;
+			ambientColor = u_ambientLight.rgb;
 			diffuse = base;
-			ambientColor = vec3 (0.0);
 			attenuation = 1.0;
 		#elif defined(USE_LIGHT_VERTEX)
 			lightColor = bias_color;
-			diffuse = base;
 			ambientColor = vec3 (0.0);
+			diffuse = base;
 			attenuation = 1.0;
 		#else
 			lightColor = bias_color;
@@ -695,7 +742,7 @@ void main() {
 			attenuation = 1.0;
 		#endif
 
-		N = CalcNormal( var_Normal.xyz, var_Tangent, frag_tex_coord0 );	
+		N = CalcNormal( var_Normal.xyz, var_Tangent, color_tex_coord );	
 
 		//#if defined(USE_TX1) || defined(USE_TX2)
 		#if defined(USE_LIGHTMAP) && defined(USE_TX_BOTH)
@@ -713,7 +760,7 @@ void main() {
 
 		// metallic roughness workflow
 		if ( physical_texture_set < 0 ) {
-			vec4 ORMS = texture( physical_texture, frag_tex_coord0 );
+			vec4 ORMS = texture( physical_texture, color_tex_coord );
 			ORMS.xyzw *= u_SpecularScale.zwxy;
 			specular.rgb = mix( vec3( 0.08 ) * ORMS.w, diffuse.rgb, ORMS.z );
 			diffuse.rgb *= vec3( 1.0 - ORMS.z );
@@ -725,7 +772,7 @@ void main() {
 		// specular workflow
 		else 
 		{
-			specular = texture( physical_texture, frag_tex_coord0 );
+			specular = texture( physical_texture, color_tex_coord );
 			specular.rgb *= u_SpecularScale.xyz;
 			roughness = mix( 1.0, 0.01, specular.a * ( 1.0 - u_SpecularScale.w ) );
 		}
@@ -766,6 +813,10 @@ void main() {
 			out_color.rgb += CalcIBLContribution( roughness, N, E, NE, specular.rgb * AO );
 	
 		out_color.a = diffuse.a;
+
+		#if defined(USE_FOG)
+			apply_acff( out_color, fog );
+		#endif
 	#else
 		out_color = base;
 	#endif

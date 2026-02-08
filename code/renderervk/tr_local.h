@@ -68,6 +68,13 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "iqm.h"
 
 
+#define	REFENTITYNUM_BITS	12	// as we actually using only 1 bit for dlight mask in opengl1 renderer
+#define	REFENTITYNUM_MASK	((1<<REFENTITYNUM_BITS) - 1)
+// the last N-bit number (2^REFENTITYNUM_BITS - 1) is reserved for the special world refentity,
+//  and this is reflected by the value of MAX_REFENTITIES (which therefore is not a power-of-2)
+#define	MAX_REFENTITIES		((1<<REFENTITYNUM_BITS) - 1)
+#define	REFENTITYNUM_WORLD	((1<<REFENTITYNUM_BITS) - 1)
+
 #ifdef USE_VULKAN
 #include "vk.h"
 // GL constants substitutions
@@ -106,12 +113,16 @@ typedef enum {
 
 typedef uint32_t glIndex_t;
 
-#define	REFENTITYNUM_BITS	12	// as we actually using only 1 bit for dlight mask in opengl1 renderer
-#define	REFENTITYNUM_MASK	((1<<REFENTITYNUM_BITS) - 1)
-// the last N-bit number (2^REFENTITYNUM_BITS - 1) is reserved for the special world refentity,
-//  and this is reflected by the value of MAX_REFENTITIES (which therefore is not a power-of-2)
-#define	MAX_REFENTITIES		((1<<REFENTITYNUM_BITS) - 1)
-#define	REFENTITYNUM_WORLD	((1<<REFENTITYNUM_BITS) - 1)
+#if 0
+	// moved before vk.h
+	#define	REFENTITYNUM_BITS	12	// as we actually using only 1 bit for dlight mask in opengl1 renderer
+	#define	REFENTITYNUM_MASK	((1<<REFENTITYNUM_BITS) - 1)
+	// the last N-bit number (2^REFENTITYNUM_BITS - 1) is reserved for the special world refentity,
+	//  and this is reflected by the value of MAX_REFENTITIES (which therefore is not a power-of-2)
+	#define	MAX_REFENTITIES		((1<<REFENTITYNUM_BITS) - 1)
+	#define	REFENTITYNUM_WORLD	((1<<REFENTITYNUM_BITS) - 1)
+#endif
+
 // 14 bits
 // can't be increased without changing bit packing for drawsurfs
 // see QSORT_SHADERNUM_SHIFT
@@ -2194,6 +2205,11 @@ void RE_VertexLighting( qboolean allowed );
 
 #ifdef USE_VK_PBR
 // pbr
+void		Matrix16Copy( const mat4_t in, mat4_t out );
+void		myGlMultMatrix( const float *a, const float *b, float *out );
+void		Matrix16Identity( mat4_t out );
+
+// 
 // mikktspace
 void		vk_mikkt_bsp_tri_generate( srfTriangles_t *tri );
 void		vk_mikkt_bsp_face_generate( srfSurfaceFace_t *face );

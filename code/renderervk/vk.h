@@ -61,8 +61,9 @@
 
 #define VK_DESC_UNIFORM_MAIN_BINDING		0
 #define VK_DESC_UNIFORM_CAMERA_BINDING		1
-#define VK_DESC_UNIFORM_GLOBAL_BINDING		2
-#define VK_DESC_UNIFORM_COUNT				3
+#define VK_DESC_UNIFORM_ENTITY_BINDING		2
+#define VK_DESC_UNIFORM_GLOBAL_BINDING		3
+#define VK_DESC_UNIFORM_COUNT				4
 
 typedef enum {
 	TYPE_COLOR_BLACK,
@@ -204,6 +205,7 @@ typedef struct {
 
 #ifdef USE_VK_PBR
 	int						vk_light_flags;
+	int						lightmap_stage;
 	uint32_t				vk_pbr_flags;
 	vec4_t					specularScale;
 	vec4_t					normalScale;
@@ -241,6 +243,14 @@ typedef struct vkUniform_s {
 	vec4_t fogColor;			// fragment
 } vkUniform_t;
 
+typedef struct vkUniformEntity_s {
+	vec4_t ambientLight;
+	vec4_t directedLight;
+	vec4_t lightOrigin;
+	vec4_t localViewOrigin;
+	mat4_t modelMatrix;
+} vkUniformEntity_t;
+
 typedef struct vkUniformGlobal_s {
 	vec4_t				specularScale;	
 	vec4_t				normalScale;	
@@ -248,7 +258,7 @@ typedef struct vkUniformGlobal_s {
 
 typedef struct vkUniformCamera_s {
 	vec4_t viewOrigin;
-	mat4_t modelMatrix;
+	//mat4_t modelMatrix;
 } vkUniformCamera_t;
 
 #define TESS_XYZ   (1)
@@ -433,6 +443,8 @@ typedef struct vk_tess_s {
 	uint32_t		uniform_read_offset;
 #ifdef USE_VK_PBR
 	uint32_t			camera_ubo_offset;
+	uint32_t			entity_ubo_offset[REFENTITYNUM_WORLD + 1];
+	//uint32_t			entity_ubo_offset[1024];
 	VkDeviceSize		buf_offset[9];
 	VkDeviceSize		vbo_offset[10];
 #else
@@ -600,6 +612,7 @@ typedef struct {
 
 	uint32_t uniform_item_size;
 	uint32_t uniform_camera_item_size;
+	uint32_t uniform_entity_item_size;
 	uint32_t uniform_global_item_size;
 	uint32_t uniform_alignment;
 	uint32_t storage_alignment;

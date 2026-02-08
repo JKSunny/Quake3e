@@ -351,7 +351,11 @@ void R_RotateForEntity( const trRefEntity_t *ent, const viewParms_t *viewParms,
 	vec3_t	delta;
 	float	axisLength;
 
+#ifdef USE_VK_PBR
+	if ( ent->e.reType != RT_MODEL || ent == &tr.worldEntity ) {
+#else
 	if ( ent->e.reType != RT_MODEL ) {
+#endif
 		*or = viewParms->world;
 		return;
 	}

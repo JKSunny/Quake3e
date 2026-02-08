@@ -998,12 +998,13 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 	is_pbr_surface = vk_is_valid_pbr_surface( tess.shader->hasPBR );
 
 	if ( is_pbr_surface ) {
-		Com_Memcpy( &uniform_camera.modelMatrix, backEnd.or.modelMatrix, sizeof(float) * 16 );
+#if 0
+		//Com_Memcpy( &uniform_camera.modelMatrix, backEnd.or.modelMatrix, sizeof(float) * 16 );
 		Com_Memcpy( &uniform_camera.viewOrigin, backEnd.refdef.vieworg, sizeof( vec3_t) );
 		uniform_camera.viewOrigin[3] = 0.0;
 
 		vk.cmd->camera_ubo_offset = vk_append_uniform( &uniform_camera, sizeof(uniform_camera), vk.uniform_camera_item_size );
-
+#endif
 		pushUniform = qtrue;
 	}
 #endif
@@ -1064,6 +1065,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		Vk_Pipeline_Def	def;
 		vk_get_pipeline_def( pipeline, &def );
 
+
 		//if ( is_pbr_surface ) 
 		{
 			Vector4Copy( pStage->normalScale, uniform_global.normalScale );
@@ -1112,6 +1114,23 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		}
 
 		vk_push_uniform_global( &uniform_global );
+
+		if ( backEnd.currentEntity ) 
+		{
+			if ( backEnd.currentEntity == &backEnd.entity2D ) 
+			{
+			}
+			else if ( backEnd.currentEntity == &tr.worldEntity ) 
+			{
+				vk.cmd->descriptor_set.offset[VK_DESC_UNIFORM_ENTITY_BINDING] = vk.cmd->entity_ubo_offset[REFENTITYNUM_WORLD];
+			}
+			else 
+			{
+				const int refEntityNum = backEnd.currentEntity - backEnd.refdef.entities;
+
+				vk.cmd->descriptor_set.offset[VK_DESC_UNIFORM_ENTITY_BINDING] = vk.cmd->entity_ubo_offset[refEntityNum];
+			}
+		}
 #endif
 
 #ifdef USE_VK_PBR
@@ -1265,6 +1284,7 @@ uint32_t vk_push_uniform( const vkUniform_t *uniform ) {
 	vk_update_descriptor( VK_DESC_UNIFORM, vk.cmd->uniform_descriptor );
 	vk_update_descriptor_offset( VK_DESC_UNIFORM_MAIN_BINDING, offset );
 	vk_update_descriptor_offset( VK_DESC_UNIFORM_CAMERA_BINDING, vk.cmd->camera_ubo_offset );
+	//vk_update_descriptor_offset( VK_DESC_UNIFORM_ENTITY_BINDING, vk.cmd->entity_ubo_offset );
 
 	return offset;
 }

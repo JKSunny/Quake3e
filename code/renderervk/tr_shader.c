@@ -3723,6 +3723,7 @@ static shader_t *FinishShader( void ) {
 			def.state_bits = pStage->stateBits;
 			def.vk_light_flags = 0;
 			def.vk_pbr_flags = 0;
+			def.lightmap_stage = -1;
 
 			if ( pStage->mtEnv3 ) {
 				switch ( pStage->mtEnv3 ) {
@@ -3915,9 +3916,16 @@ static shader_t *FinishShader( void ) {
 #ifdef USE_VK_PBR
 			if ( def.shader_type >= TYPE_GENERIC_BEGIN  )
 			{
-				if ( hasLightmapStage )
+				//if ( hasLightmapStage )
+				if ( pStage->numTexBundles > 1 && pStage->bundle[1].lightmap && !pStage->bundle[0].lightmap )
 				{
 					def.vk_light_flags |= LIGHTDEF_USE_LIGHTMAP;
+					def.lightmap_stage = 1;
+				}
+				else if ( pStage->numTexBundles > 1 && pStage->bundle[0].lightmap && !pStage->bundle[1].lightmap )
+				{
+					def.vk_light_flags |= LIGHTDEF_USE_LIGHTMAP;
+					def.lightmap_stage = 0;
 				}
 				else if ( pStage->bundle[0].rgbGen == CGEN_LIGHTING_DIFFUSE )
 				{

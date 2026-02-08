@@ -2393,6 +2393,7 @@ static void vk_create_layout_binding( int binding, VkDescriptorType type,
 	if ( is_uniform ) {
 		const VkShaderStageFlags uniform_flags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 		vk_push_layout_binding( bind, type, VK_DESC_UNIFORM_CAMERA_BINDING, VK_SHADER_STAGE_VERTEX_BIT );
+		vk_push_layout_binding( bind, type, VK_DESC_UNIFORM_ENTITY_BINDING, uniform_flags );
 		vk_push_layout_binding( bind, type, VK_DESC_UNIFORM_GLOBAL_BINDING, uniform_flags );
 
 		count = VK_DESC_UNIFORM_COUNT;    
@@ -2434,6 +2435,7 @@ void vk_update_uniform_descriptor( VkDescriptorSet descriptor, VkBuffer buffer )
 
 	vk_write_uniform_descriptor( desc, info, buffer, descriptor, VK_DESC_UNIFORM_MAIN_BINDING, sizeof(vkUniform_t) );
 	vk_write_uniform_descriptor( desc, info, buffer, descriptor, VK_DESC_UNIFORM_CAMERA_BINDING, sizeof(vkUniformCamera_t) );
+	vk_write_uniform_descriptor( desc, info, buffer, descriptor, VK_DESC_UNIFORM_ENTITY_BINDING, sizeof(vkUniformEntity_t) );
 	vk_write_uniform_descriptor( desc, info, buffer, descriptor, VK_DESC_UNIFORM_GLOBAL_BINDING, sizeof(vkUniformGlobal_t) );
 
 	qvkUpdateDescriptorSets(vk.device, VK_DESC_UNIFORM_COUNT, desc, 0, NULL);
@@ -4289,6 +4291,7 @@ void vk_initialize( void )
 	vk.uniform_item_size = PAD( sizeof( vkUniform_t ), (size_t)vk.uniform_alignment );
 #ifdef USE_VK_PBR	
 	vk.uniform_camera_item_size = PAD( sizeof( vkUniformCamera_t ), (size_t)vk.uniform_alignment );
+	vk.uniform_entity_item_size = PAD( sizeof(vkUniformEntity_t),	(size_t)vk.uniform_alignment );
 	vk.uniform_global_item_size = PAD( sizeof( vkUniformGlobal_t ), (size_t)vk.uniform_alignment );
 #endif
 	// for flare visibility tests
@@ -6177,11 +6180,12 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
         int32_t env_texture_set;
         int32_t deluxe_mapping;
         float deluxe_specular_scale;
+        int32_t lightmap_stage;
 #endif
     } frag_spec_data; 
 
 #ifdef USE_VK_PBR
-	VkSpecializationMapEntry spec_entries[16];
+	VkSpecializationMapEntry spec_entries[17];
 #else
     VkSpecializationMapEntry spec_entries[12];
 #endif
@@ -6774,6 +6778,12 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
         INIT_SPEC_ENTRY_FRAG( 13,    env_texture_set )
         INIT_SPEC_ENTRY_FRAG( 14,    deluxe_mapping )
         INIT_SPEC_ENTRY_FRAG( 15,    deluxe_specular_scale )
+        INIT_SPEC_ENTRY_FRAG( 16,    lightmap_stage )
+
+	    if ( ( def->vk_light_flags & LIGHTDEF_USE_LIGHTMAP ) == 0 )
+            frag_spec_data.lightmap_stage = -1;
+		else
+			frag_spec_data.lightmap_stage = def->lightmap_stage;
 
 	    if ( ( def->vk_pbr_flags & PBR_HAS_NORMALMAP ) == 0 )
             frag_spec_data.normal_texture_set = -1;
@@ -7939,6 +7949,7 @@ void vk_bind_descriptor_sets( void )
 	if ( /*start == VK_DESC_STORAGE || */ start == VK_DESC_UNIFORM ) { // uniform offset or storage offset
 		offsets[ offset_count++ ] = vk.cmd->descriptor_set.offset[ start ];
 		offsets[offset_count++] = vk.cmd->descriptor_set.offset[VK_DESC_UNIFORM_CAMERA_BINDING];
+		offsets[offset_count++] = vk.cmd->descriptor_set.offset[VK_DESC_UNIFORM_ENTITY_BINDING];
 		offsets[offset_count++] = vk.cmd->descriptor_set.offset[VK_DESC_UNIFORM_GLOBAL_BINDING];
 	}
 
@@ -8925,6 +8936,7 @@ qboolean vk_bloom( void )
 
 					offsets[offset_count++] = vk.cmd->descriptor_set.offset[i];
 					offsets[offset_count++] = vk.cmd->descriptor_set.offset[VK_DESC_UNIFORM_CAMERA_BINDING];
+					offsets[offset_count++] = vk.cmd->descriptor_set.offset[VK_DESC_UNIFORM_ENTITY_BINDING];
 					offsets[offset_count++] = vk.cmd->descriptor_set.offset[VK_DESC_UNIFORM_GLOBAL_BINDING];
 
 					qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, i, 1, &vk.cmd->descriptor_set.current[i], offset_count, offsets );
@@ -8940,6 +8952,7 @@ qboolean vk_bloom( void )
 	return qtrue;
 }
 
+#ifdef VK_CUBEMAP
 enum Target { IRRADIANCE = 0, PREFILTEREDENV = 1 };
 
 typedef struct {
@@ -9428,6 +9441,7 @@ void vk_generate_cubemaps( cubemap_t *cube )
 
 	vk_begin_main_render_pass();
 }
+#endif
 
 #ifdef VK_COMPUTE_NORMALMAP
 /*
