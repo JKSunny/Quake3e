@@ -1434,6 +1434,9 @@ $(B)/rend2/%.o: $(CMDIR)/%.c
 $(B)/rendv/%.o: $(RVDIR)/%.c
 	$(DO_REND_CC)
 
+$(B)/rendv/mikktspace.o: $(RVDIR)/utils/mikktspace/mikktspace.c
+	$(DO_REND_CC)
+	
 $(B)/rendv/%.o: $(RCDIR)/%.c
 	$(DO_REND_CC)
 
