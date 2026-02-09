@@ -5687,9 +5687,11 @@ static qboolean vk_surface_format_color_depth( VkFormat format, int *r, int *g, 
     arr[index].offset = offsetof(struct_type, member); \
     arr[index].size = sizeof(struct_data.member);
 
-// vertex specialzation constants are not used
-//#define INIT_SPEC_ENTRY_VERT( index, member ) \
-//    ALLOC_SPEC_ENTRY( vert_spec_entries, index, struct VertSpecData, vert_spec_data, member )
+/* 
+//vertex specialzation constants are not used
+#define INIT_SPEC_ENTRY_VERT( index, member ) \
+    ALLOC_SPEC_ENTRY( vert_spec_entries, index, struct VertSpecData, vert_spec_data, member )
+*/
 
 #define INIT_SPEC_ENTRY_FRAG( index, member ) \
     ALLOC_SPEC_ENTRY( spec_entries, index, struct FragSpecData, frag_spec_data, member )
@@ -9536,9 +9538,8 @@ void vk_create_compute_normalmap_pipelines()
 
 void vk_add_compute_normalmap( shaderStage_t *stage, image_t *albedo, imgFlags_t flags ) 
 {
-    if ( !r_genNormalMaps->integer )
-        return;
-
+	if ( !r_genNormalMaps->integer )
+		return;
 
 	if ( stage->normalMap || !albedo )
 		return;

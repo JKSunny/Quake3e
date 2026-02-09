@@ -745,39 +745,22 @@ void VectorLerp( vec3_t a, vec3_t b, float lerp, vec3_t c)
 */
 static void LerpMeshVertexes_scalar(mdvSurface_t *surf, float backlerp)
 {
-	short	*oldXyz, *newXyz, *oldNormals, *newNormals;
-	float	*outXyz;
-	float	oldXyzScale, newXyzScale;
-	float	oldNormalScale, newNormalScale;
-	int		vertNum;
-	unsigned lat, lng;
-	int		numVerts;
-
+	float *outXyz;
+	float *outNormal, *outTangent;
 	mdvVertex_t *newVerts;
-	float	*outNormal;
-	float	*outTangent;
+	int		vertNum;
+
+	newVerts = surf->verts + backEnd.currentEntity->e.frame * surf->numVerts;
 
 	outXyz = tess.xyz[tess.numVertexes];
 	outNormal = tess.normal[tess.numVertexes];
 	outTangent = tess.qtangent[tess.numVertexes];
 
-
-
-	//newXyz = (short *)((byte *)surf + surf->ofsXyzNormals)
-	//	+ (backEnd.currentEntity->e.frame * surf->numVerts * 4);
-	//newNormals = newXyz + 3;
-	//
-	//newXyzScale = MD3_XYZ_SCALE * (1.0 - backlerp);
-	//newNormalScale = 1.0 - backlerp;
-	//
-	//numVerts = surf->numVerts;
-
-	newVerts = surf->verts + backEnd.currentEntity->e.frame * surf->numVerts;
-
 	if ( backlerp == 0 ) {
 		//
 		// just copy the vertexes
 		//
+
 		for (vertNum=0 ; vertNum < surf->numVerts ; vertNum++)
 		{
 			VectorCopy(newVerts->xyz,    outXyz);
@@ -794,6 +777,7 @@ static void LerpMeshVertexes_scalar(mdvSurface_t *surf, float backlerp)
 		//
 		// interpolate and copy the vertex and normal
 		//
+
 		mdvVertex_t *oldVerts;
 
 		oldVerts = surf->verts + backEnd.currentEntity->e.oldframe * surf->numVerts;
@@ -818,8 +802,8 @@ static void LerpMeshVertexes_scalar(mdvSurface_t *surf, float backlerp)
 			outNormal += 4;
 			outTangent += 4;
 		}
-    	VectorArrayNormalize((vec4_t *)tess.normal[tess.numVertexes], surf->numVerts);
-    	VectorArrayNormalize((vec4_t *)tess.qtangent[tess.numVertexes], surf->numVerts);
+    	//VectorArrayNormalize((vec4_t *)tess.normal[tess.numVertexes], surf->numVerts);
+    	//VectorArrayNormalize((vec4_t *)tess.qtangent[tess.numVertexes], surf->numVerts);
    	}
 }
 

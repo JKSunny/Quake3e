@@ -550,7 +550,6 @@ uint32_t vk_push_uniform_global( const vkUniformGlobal_t *uniform );
 #endif
 void VK_SetFogParams( vkUniform_t *uniform, int *fogStage );
 static vkUniform_t			uniform;
-static vkUniformCamera_t	uniform_camera;
 static vkUniformGlobal_t	uniform_global;
 
 /*
@@ -998,13 +997,6 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 	is_pbr_surface = vk_is_valid_pbr_surface( tess.shader->hasPBR );
 
 	if ( is_pbr_surface ) {
-#if 0
-		//Com_Memcpy( &uniform_camera.modelMatrix, backEnd.or.modelMatrix, sizeof(float) * 16 );
-		Com_Memcpy( &uniform_camera.viewOrigin, backEnd.refdef.vieworg, sizeof( vec3_t) );
-		uniform_camera.viewOrigin[3] = 0.0;
-
-		vk.cmd->camera_ubo_offset = vk_append_uniform( &uniform_camera, sizeof(uniform_camera), vk.uniform_camera_item_size );
-#endif
 		pushUniform = qtrue;
 	}
 #endif
