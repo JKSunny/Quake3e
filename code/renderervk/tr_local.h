@@ -42,6 +42,12 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #endif
 
 #define USE_VBO				// store static world geometry in VBO
+#ifdef USE_VBO
+	#define MAX_VBOS      4096
+
+	#define USE_VBO_MDV
+#endif
+
 #define USE_FOG_ONLY
 #define USE_FOG_COLLAPSE	// not compatible with legacy dlights
 #if defined (USE_VBO) && !defined(USE_FOG_ONLY)
@@ -107,6 +113,12 @@ typedef enum {
 #define GLint				int
 #define GLuint				unsigned int
 #define GLboolean			VkBool32
+
+#ifdef USE_VK_PBR
+typedef void GLvoid;
+typedef int GLsizei;
+typedef unsigned int glIndex_t;
+#endif
 #else
 #define GL_INDEX_TYPE		GL_UNSIGNED_INT
 #endif
@@ -653,6 +665,39 @@ typedef struct {
 } comp_normalmap_item_t;
 #endif
 
+#ifdef USE_VK_PBR
+typedef struct VBO_s
+{	
+	int				index;
+
+	VkBuffer		buffer;
+	VkDeviceMemory	memory;
+
+	uint32_t		offsets[12];
+
+	int				size;
+	void			*mapped;
+	struct {
+		VkBuffer		buffer;
+		VkDeviceMemory	memory;
+	} staging;
+} VBO_t;
+
+typedef struct IBO_s
+{
+	VkBuffer		buffer;
+	VkDeviceMemory	memory;
+
+	int				size;
+	void			*mapped;
+
+	struct {
+		VkBuffer		buffer;
+		VkDeviceMemory	memory;
+	} staging;	
+} IBO_t;
+#endif
+
 //=================================================================================
 
 // max surfaces per-skin
@@ -753,6 +798,9 @@ typedef enum {
 	SF_IQM,
 	SF_FLARE,
 	SF_ENTITY,				// beams, rails, lightning, etc that can be determined by entity
+#ifdef USE_VBO_MDV
+	SF_VBO_MDVMESH,
+#endif
 
 	SF_NUM_SURFACE_TYPES,
 	SF_MAX = 0x7fffffff			// ensures that sizeof( surfaceType_t ) == sizeof( int )
@@ -1094,6 +1142,28 @@ typedef struct mdvSurface_s
 	struct mdvModel_s *model;
 } mdvSurface_t;
 
+#ifdef USE_VBO_MDV
+typedef struct srfVBOMDVMesh_s
+{
+	surfaceType_t   surfaceType;
+
+	struct mdvModel_s *mdvModel;
+	struct mdvSurface_s *mdvSurface;
+
+	// backEnd stats
+	int				indexOffset;
+	int             numIndexes;
+	int             numVerts;
+	glIndex_t       minIndex;
+	glIndex_t       maxIndex;
+
+	// static render data
+	VBO_t          *vbo;
+	IBO_t          *ibo;
+
+} srfVBOMDVMesh_t;
+#endif
+
 typedef struct mdvModel_s
 {
 	int             numFrames;
@@ -1105,9 +1175,9 @@ typedef struct mdvModel_s
 
 	int             numSurfaces;
 	mdvSurface_t   *surfaces;
-#if 0
-	int             numVaoSurfaces;
-	srfVaoMdvMesh_t  *vaoSurfaces;
+#ifdef USE_VBO_MDV
+	int             numVBOSurfaces;
+	srfVBOMDVMesh_t  *vboSurfaces;
 #endif
 	int             numSkins;
 } mdvModel_t;
@@ -1422,6 +1492,14 @@ typedef struct {
 
 	int						numImages;
 	image_t					*images[MAX_DRAWIMAGES];
+
+#ifdef USE_VK_PBR
+	int						numVBOs;
+	VBO_t					*vbos[MAX_VBOS];
+
+	int						numIBOs;
+	IBO_t					*ibos[MAX_VBOS];
+#endif
 
 	// shader indexes from other modules will be looked up in tr.shaders[]
 	// shader indexes from drawsurfs will be looked up in sortedShaders[]
@@ -1779,6 +1857,8 @@ typedef struct stageVars
 	vec2_t		*texcoordPtr[NUM_TEXTURE_BUNDLES];
 } stageVars_t;
 
+#define MAX_MULTIDRAW_PRIMITIVES	16384
+
 typedef struct shaderCommands_s 
 {
 #pragma pack(push,16)
@@ -1805,6 +1885,10 @@ typedef struct shaderCommands_s
 	int			vboIndex;
 	int			vboStage;
 	qboolean	allowVBO;
+#ifdef USE_VK_PBR
+	VBO_t		*vbo_model; // ghoul2/mdv item index
+	IBO_t		*ibo_model; // ghoul2/mdv item index
+#endif
 #endif
 
 	shader_t	*shader;
@@ -1815,6 +1899,15 @@ typedef struct shaderCommands_s
 #endif
 	int			numIndexes;
 	int			numVertexes;
+
+#ifdef USE_VK_PBR
+	int			multiDrawPrimitives;
+	GLsizei		multiDrawNumIndexes[MAX_MULTIDRAW_PRIMITIVES];
+	glIndex_t	*multiDrawFirstIndex[MAX_MULTIDRAW_PRIMITIVES];
+	glIndex_t	*multiDrawLastIndex[MAX_MULTIDRAW_PRIMITIVES];
+	glIndex_t	multiDrawMinIndex[MAX_MULTIDRAW_PRIMITIVES];
+	glIndex_t	multiDrawMaxIndex[MAX_MULTIDRAW_PRIMITIVES];
+#endif
 
 #ifdef USE_PMLIGHT
 	const dlight_t* light;
@@ -2238,6 +2331,15 @@ extern void VBO_Cleanup( void );
 extern void VBO_QueueItem( int itemIndex );
 extern void VBO_ClearQueue( void );
 extern void VBO_Flush( void );
+
+#ifdef USE_VK_PBR
+void		vk_release_model_vbo_all( void );
+
+
+IBO_t *R_CreateIBO( const char *name, const byte *vbo_data, int vbo_size );
+VBO_t *R_CreateVBO( const char *name, const byte *vbo_data, int vbo_size );
+#endif
+
 #endif
 
 int R_GetLightmapCoords( int lightmapIndex, float *x, float *y );

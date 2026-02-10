@@ -289,6 +289,10 @@ void RB_BeginSurface( shader_t *shader, int fogNum ) {
 	tess.numVertexes = 0;
 	tess.shader = state;
 	tess.fogNum = fogNum;
+#ifdef USE_VK_PBR
+	tess.multiDrawPrimitives = 0;
+#endif
+
 
 #ifdef USE_LEGACY_DLIGHTS
 	tess.dlightBits = 0;		// will be OR'd in by surface functions
@@ -1604,6 +1608,12 @@ void RB_EndSurface( void ) {
 	// clear shader so we can tell we don't have any unclosed surfaces
 	tess.numIndexes = 0;
 	tess.numVertexes = 0;
+
+#ifdef USE_VK_PBR
+	tess.vbo_model = NULL;
+	tess.ibo_model = NULL;
+	//VBO_ClearQueue();
+#endif
 
 #ifdef USE_VBO
 	tess.vboIndex = 0;

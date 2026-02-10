@@ -514,6 +514,182 @@ static void initItem( vbo_item_t *item )
 	item->soft_offset = -1;
 }
 
+#ifdef USE_VBO_MDV
+typedef struct mdv_attributes_s {
+	vec4_t *verts;
+	vec4_t *normals;
+	vec2_t *texcoords;
+	vec4_t *tangents;
+} mdv_attributes_t;
+
+int get_mdv_stride( void ) {
+	int stride = 0;
+
+	if ( vk.mdv_vbo_stride )
+		return vk.mdv_vbo_stride;
+
+	const mdv_attributes_t attr = { 0 };
+
+	stride += sizeof(*attr.verts);
+	stride += sizeof(*attr.normals);
+	stride += sizeof(*attr.texcoords);
+	stride += sizeof(*attr.tangents);
+	
+	vk.mdv_vbo_stride = stride;
+
+	return stride;
+}
+
+void R_BuildMD3( model_t *mod, mdvModel_t *mdvModel ) 
+{
+	mdvVertex_t    *v;
+	mdvSt_t        *st;
+	mdvSurface_t   *surf;
+	srfVBOMDVMesh_t *vboSurf;
+
+	uint32_t		i, j, k;
+
+	mdvModel->numVBOSurfaces = mdvModel->numSurfaces;
+	mdvModel->vboSurfaces = (srfVBOMDVMesh_t *)ri.Hunk_Alloc(sizeof(*mdvModel->vboSurfaces) * mdvModel->numSurfaces, h_low);
+
+	if ( !mdvModel->numSurfaces )
+		return;
+
+	vboSurf = mdvModel->vboSurfaces;
+	surf = mdvModel->surfaces;
+
+	mdv_attributes_t attr = { 0 };
+
+	byte *data;
+	int dataSize = 0;
+	int ofsPosition, ofsNormals, ofsTexcoords, ofsTangents;
+	int stride = 0;
+	int numVerts = 0;
+	int numIndexes = 0;
+
+	// +1 to add total vertex count
+	int *baseVertexes = (int *)ri.Hunk_AllocateTempMemory(sizeof(int) * (mdvModel->numSurfaces + 1));
+	int *indexOffsets = (int *)ri.Hunk_AllocateTempMemory(sizeof(int) * mdvModel->numSurfaces);
+
+	// Calculate the required size of the vertex buffer.
+	for (int n = 0; n < mdvModel->numSurfaces; n++, surf++)
+	{
+		baseVertexes[n] = numVerts;
+		indexOffsets[n] = numIndexes;
+
+		numVerts += surf->numVerts;
+		numIndexes += surf->numIndexes;
+	}
+	baseVertexes[mdvModel->numSurfaces] = numVerts;
+
+	dataSize += numVerts * sizeof(*attr.verts);
+	dataSize += numVerts * sizeof(*attr.normals);
+	dataSize += numVerts * sizeof(*attr.texcoords);
+	dataSize += numVerts * sizeof(*attr.tangents);
+
+	// Allocate and write to memory
+	data = (byte *)ri.Hunk_AllocateTempMemory(dataSize);
+
+	ofsPosition = stride;
+	attr.verts = (vec4_t *)(data + ofsPosition);
+	stride += sizeof(*attr.verts);
+
+	ofsNormals = stride;
+	attr.normals = (vec4_t *)(data + ofsNormals);
+	stride += sizeof(*attr.normals);
+
+	ofsTexcoords = stride;
+	attr.texcoords = (vec2_t *)(data + ofsTexcoords);
+	stride += sizeof(*attr.texcoords);
+
+	ofsTangents = stride;
+	attr.tangents = (vec4_t *)(data + ofsTangents);
+	stride += sizeof(*attr.tangents);
+
+	// Fill in the index buffer and compute tangents
+	glIndex_t *indices = (glIndex_t *)ri.Hunk_AllocateTempMemory(sizeof(glIndex_t) * numIndexes);
+	glIndex_t *index = indices;
+
+	surf = mdvModel->surfaces;
+	for (i = 0; i < mdvModel->numSurfaces; i++, surf++)
+	{
+		vec4_t *tangentsf = (vec4_t *)ri.Hunk_AllocateTempMemory(sizeof(vec4_t) * surf->numVerts);
+
+		vk_mikkt_mdv_generate(
+			surf->numIndexes / 3,
+			surf->verts,
+			tangentsf,
+			surf->st,
+			surf->indexes
+		);
+
+		for ( k = 0; k < surf->numIndexes; k++)
+		{
+			*index = surf->indexes[k] + baseVertexes[i];
+			assert(*index >= 0 && *index < numVerts);
+			index++;
+		}
+
+		v = surf->verts;
+		for ( j = 0; j < surf->numVerts; j++, v++ )
+		{
+			VectorCopy(v->xyz, *attr.verts);
+			VectorCopy(v->normal, *attr.normals);
+			Vector4Copy( (float*)(tangentsf + j), *attr.tangents );
+
+			//*normals = R_VboPackNormal(v->normal);
+			//*tangents = tangentsf[j];
+
+			attr.verts = (vec4_t *)((byte *)attr.verts + stride);
+			attr.normals = (vec4_t *)((byte *)attr.normals + stride);
+			attr.tangents = (vec4_t *)((byte *)attr.tangents + stride);
+		}
+		ri.Hunk_FreeTempMemory(tangentsf);
+
+		st = surf->st;
+		for ( j = 0; j < surf->numVerts; j++, st++ ) 
+		{
+			(*attr.texcoords)[0] = st->st[0];
+			(*attr.texcoords)[1] = st->st[1];
+
+			attr.texcoords = (vec2_t *)((byte *)attr.texcoords + stride);
+		}
+	}
+
+	assert((byte *)attr.verts == (data + dataSize));
+
+	VBO_t *vbo = R_CreateVBO( mod->name, data, dataSize );
+	IBO_t *ibo = R_CreateIBO( mod->name, (byte *)indices, sizeof(glIndex_t) * numIndexes );
+
+	ri.Hunk_FreeTempMemory(data);
+	ri.Hunk_FreeTempMemory(indices);
+
+	vbo->offsets[0] = ofsPosition;
+	vbo->offsets[5] = ofsNormals;
+	vbo->offsets[2] = ofsTexcoords;
+	vbo->offsets[8] = ofsTangents;
+
+	surf = mdvModel->surfaces;
+	for ( i = 0; i < mdvModel->numSurfaces; i++, surf++, vboSurf++ )
+	{
+		vboSurf->surfaceType = SF_VBO_MDVMESH;
+		vboSurf->mdvModel = mdvModel;
+		vboSurf->mdvSurface = surf;
+		vboSurf->vbo = vbo;
+		vboSurf->ibo = ibo;
+
+		vboSurf->indexOffset = indexOffsets[i];
+		vboSurf->minIndex = baseVertexes[i];
+		vboSurf->maxIndex = baseVertexes[i + 1] - 1;
+		vboSurf->numVerts = surf->numVerts;
+		vboSurf->numIndexes = surf->numIndexes;
+	}
+
+	ri.Hunk_FreeTempMemory(indexOffsets);
+	ri.Hunk_FreeTempMemory(baseVertexes);
+}
+#endif
+
 
 void R_BuildWorldVBO( msurface_t *surf, int surfCount )
 {

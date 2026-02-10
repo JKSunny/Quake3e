@@ -302,8 +302,10 @@ typedef struct vkUniformCamera_s {
 #define LIGHTDEF_USE_LIGHT_VERTEX		0x0004
 #define LIGHTDEF_LIGHTTYPE_MASK			LIGHTDEF_USE_LIGHTMAP | LIGHTDEF_USE_LIGHT_VECTOR | LIGHTDEF_USE_LIGHT_VERTEX
 
-#define ByteToFloat(a)			((float)(a) * 1.0f/255.0f)
-#define FloatToByte(a)			(byte)((a) * 255.0f)
+#define BUFFER_OFFSET(i)				((char *)NULL + (i))
+
+#define ByteToFloat(a)					((float)(a) * 1.0f/255.0f)
+#define FloatToByte(a)					(byte)((a) * 255.0f)
 
 #define RGBtosRGB(a)					(((a) < 0.0031308f) ? (12.92f * (a)) : (1.055f * pow((a), 0.41666f) - 0.055f))
 #define sRGBtoRGB(a)					(((a) <= 0.04045f)  ? ((a) / 12.92f) : (pow((((a) + 0.055f) / 1.055f), 2.4)) )
@@ -611,11 +613,16 @@ typedef struct {
 	} storage;
 
 	uint32_t uniform_item_size;
+	uint32_t uniform_alignment;
+	uint32_t storage_alignment;
+
+#ifdef USE_VK_PBR
 	uint32_t uniform_camera_item_size;
 	uint32_t uniform_entity_item_size;
 	uint32_t uniform_global_item_size;
-	uint32_t uniform_alignment;
-	uint32_t storage_alignment;
+
+	uint32_t mdv_vbo_stride;
+#endif
 
 	struct {
 		VkBuffer vertex_buffer;
@@ -782,6 +789,8 @@ typedef struct {
 	qboolean blitEnabled;
 	qboolean msaaActive;
 #ifdef USE_VK_PBR
+	qboolean vboMdvActive;
+
 	qboolean normalMappingActive;
 	qboolean specularMappingActive;
 	qboolean useFastLight;

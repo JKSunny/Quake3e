@@ -1946,6 +1946,9 @@ void R_Init( void ) {
 	VarInfo();
 
 #ifdef USE_VULKAN
+#ifdef USE_VK_PBR
+	vk_release_model_vbo_all();
+#endif
 	vk_create_pipelines();
 #ifdef VK_PBR_BRDFLUT
 	vk_create_brfdlut();

@@ -2912,6 +2912,233 @@ qboolean vk_alloc_vbo( const byte *vbo_data, int vbo_size )
 
 	return qtrue;
 }
+
+#ifdef USE_VK_PBR
+static void vk_release_model_vbo( uint32_t index )
+{
+	if ( !tr.vbos[index] )
+		return;
+
+	if ( tr.vbos[index]->buffer )
+		qvkDestroyBuffer( vk.device, tr.vbos[index]->buffer, NULL );
+	
+	if ( tr.vbos[index]->memory )
+		qvkFreeMemory( vk.device, tr.vbos[index]->memory, NULL );
+
+	tr.vbos[index]->memory = VK_NULL_HANDLE;
+	tr.vbos[index]->buffer = VK_NULL_HANDLE;
+}
+
+static void vk_release_model_ibo( uint32_t index )
+{
+	if ( !tr.ibos[index] )
+		return;
+
+	if ( tr.ibos[index]->buffer )
+		qvkDestroyBuffer( vk.device, tr.ibos[index]->buffer, NULL );
+	
+	if ( tr.ibos[index]->memory )
+		qvkFreeMemory( vk.device, tr.ibos[index]->memory, NULL );
+
+	tr.ibos[index]->memory = VK_NULL_HANDLE;
+	tr.ibos[index]->buffer = VK_NULL_HANDLE;
+}
+
+void vk_release_model_vbo_all( void ) {
+	uint32_t i;
+
+	for ( i = 0 ; i < tr.numVBOs; i++ ) {
+		vk_release_model_vbo( i );
+		vk_release_model_ibo( i );
+	}
+
+	tr.numVBOs = 0;
+	tr.numIBOs = 0;
+}
+
+IBO_t *R_CreateIBO( const char *name, const byte *vbo_data, int vbo_size )
+{
+	VkMemoryRequirements vb_mem_reqs;
+	VkMemoryAllocateInfo alloc_info;
+	VkBufferCreateInfo desc;
+	VkDeviceSize vertex_buffer_offset;
+	VkDeviceSize allocationSize;
+	uint32_t memory_type_bits;
+	VkBuffer staging_vertex_buffer;
+	VkDeviceMemory staging_buffer_memory;
+	VkCommandBuffer command_buffer;
+	VkBufferCopy copyRegion[1];
+	void *data;
+
+	IBO_t          *ibo;
+
+	if ( tr.numIBOs == MAX_VBOS ) {
+		ri.Error( ERR_DROP, "R_CreateVBO: MAX_VBOS hit");
+
+	}
+	vk_release_model_ibo( tr.numIBOs );
+
+	ibo = tr.ibos[tr.numIBOs] = (IBO_t *)ri.Hunk_Alloc(sizeof(*ibo), h_low);
+
+	desc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	desc.pNext = NULL;
+	desc.flags = 0;
+	desc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	desc.queueFamilyIndexCount = 0;
+	desc.pQueueFamilyIndices = NULL;
+
+	// device-local buffer
+	desc.size = vbo_size;
+	desc.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+	VK_CHECK( qvkCreateBuffer( vk.device, &desc, NULL, &tr.ibos[tr.numIBOs]->buffer ) );
+	
+	// staging buffer
+	desc.size = vbo_size;
+	desc.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+	VK_CHECK(qvkCreateBuffer(vk.device, &desc, NULL, &staging_vertex_buffer));
+
+	// memory requirements
+	qvkGetBufferMemoryRequirements( vk.device, tr.ibos[tr.numIBOs]->buffer, &vb_mem_reqs );
+	vertex_buffer_offset = 0;
+	allocationSize = vertex_buffer_offset + vb_mem_reqs.size;
+	memory_type_bits = vb_mem_reqs.memoryTypeBits;
+
+	alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	alloc_info.pNext = NULL;
+	alloc_info.allocationSize = allocationSize;
+	alloc_info.memoryTypeIndex = find_memory_type(memory_type_bits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	VK_CHECK(qvkAllocateMemory( vk.device, &alloc_info, NULL, &tr.ibos[tr.numIBOs]->memory));
+	qvkBindBufferMemory( vk.device, tr.ibos[tr.numIBOs]->buffer, tr.ibos[tr.numIBOs]->memory, vertex_buffer_offset );
+	// staging buffers
+
+	// memory requirements
+	qvkGetBufferMemoryRequirements(vk.device, staging_vertex_buffer, &vb_mem_reqs);
+	vertex_buffer_offset = 0;
+	allocationSize = vertex_buffer_offset + vb_mem_reqs.size;
+	memory_type_bits = vb_mem_reqs.memoryTypeBits;
+
+	alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	alloc_info.pNext = NULL;
+	alloc_info.allocationSize = allocationSize;
+	alloc_info.memoryTypeIndex = find_memory_type(memory_type_bits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+	VK_CHECK(qvkAllocateMemory(vk.device, &alloc_info, NULL, &staging_buffer_memory));
+	qvkBindBufferMemory(vk.device, staging_vertex_buffer, staging_buffer_memory, vertex_buffer_offset);
+
+	VK_CHECK(qvkMapMemory(vk.device, staging_buffer_memory, 0, VK_WHOLE_SIZE, 0, &data));
+	memcpy((byte*)data + vertex_buffer_offset, vbo_data, vbo_size);
+	qvkUnmapMemory(vk.device, staging_buffer_memory);
+
+	command_buffer = begin_command_buffer();
+	copyRegion[0].srcOffset = 0;
+	copyRegion[0].dstOffset = 0;
+	copyRegion[0].size = vbo_size;
+	qvkCmdCopyBuffer( command_buffer, staging_vertex_buffer, tr.ibos[tr.numIBOs]->buffer, 1, &copyRegion[0] );
+	end_command_buffer( command_buffer, __func__ );
+
+	qvkDestroyBuffer(vk.device, staging_vertex_buffer, NULL);
+	qvkFreeMemory(vk.device, staging_buffer_memory, NULL);
+
+	SET_OBJECT_NAME( tr.ibos[tr.numIBOs]->buffer, va( "static IBO[2] %s", name ), VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT );
+	SET_OBJECT_NAME( tr.ibos[tr.numIBOs]->memory, va( "static IBO[2] memory %s", name ), VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_MEMORY_EXT );
+
+	tr.numIBOs++;
+
+	ibo->size = vbo_size;
+	return ibo;
+}
+
+VBO_t *R_CreateVBO( const char *name, const byte *vbo_data, int vbo_size )
+{
+	VkMemoryRequirements vb_mem_reqs;
+	VkMemoryAllocateInfo alloc_info;
+	VkBufferCreateInfo desc;
+	VkDeviceSize vertex_buffer_offset;
+	VkDeviceSize allocationSize;
+	uint32_t memory_type_bits;
+	VkBuffer staging_vertex_buffer;
+	VkDeviceMemory staging_buffer_memory;
+	VkCommandBuffer command_buffer;
+	VkBufferCopy copyRegion[1];
+	void *data;
+
+	VBO_t          *vbo;
+
+	if ( tr.numVBOs == MAX_VBOS ) {
+		ri.Error( ERR_DROP, "R_CreateVBO: MAX_VBOS hit");
+
+	}
+
+	vk_release_model_vbo( tr.numVBOs );
+
+	vbo = tr.vbos[tr.numVBOs] = (VBO_t *)ri.Hunk_Alloc(sizeof(*vbo), h_low);
+
+	desc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	desc.pNext = NULL;
+	desc.flags = 0;
+	desc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	desc.queueFamilyIndexCount = 0;
+	desc.pQueueFamilyIndices = NULL;
+
+	// device-local buffer
+	desc.size = vbo_size;
+	desc.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	VK_CHECK( qvkCreateBuffer( vk.device, &desc, NULL, &tr.vbos[tr.numVBOs]->buffer ) );
+	
+	// staging buffer
+	desc.size = vbo_size;
+	desc.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	VK_CHECK(qvkCreateBuffer(vk.device, &desc, NULL, &staging_vertex_buffer));
+
+	// memory requirements
+	qvkGetBufferMemoryRequirements( vk.device, tr.vbos[tr.numVBOs]->buffer, &vb_mem_reqs );
+	vertex_buffer_offset = 0;
+	allocationSize = vertex_buffer_offset + vb_mem_reqs.size;
+	memory_type_bits = vb_mem_reqs.memoryTypeBits;
+
+	alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	alloc_info.pNext = NULL;
+	alloc_info.allocationSize = allocationSize;
+	alloc_info.memoryTypeIndex = find_memory_type(memory_type_bits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	VK_CHECK(qvkAllocateMemory( vk.device, &alloc_info, NULL, &tr.vbos[tr.numVBOs]->memory));
+	qvkBindBufferMemory( vk.device, tr.vbos[tr.numVBOs]->buffer, tr.vbos[tr.numVBOs]->memory, vertex_buffer_offset );
+	// staging buffers
+
+	// memory requirements
+	qvkGetBufferMemoryRequirements(vk.device, staging_vertex_buffer, &vb_mem_reqs);
+	vertex_buffer_offset = 0;
+	allocationSize = vertex_buffer_offset + vb_mem_reqs.size;
+	memory_type_bits = vb_mem_reqs.memoryTypeBits;
+
+	alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	alloc_info.pNext = NULL;
+	alloc_info.allocationSize = allocationSize;
+	alloc_info.memoryTypeIndex = find_memory_type(memory_type_bits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+	VK_CHECK(qvkAllocateMemory(vk.device, &alloc_info, NULL, &staging_buffer_memory));
+	qvkBindBufferMemory(vk.device, staging_vertex_buffer, staging_buffer_memory, vertex_buffer_offset);
+
+	VK_CHECK(qvkMapMemory(vk.device, staging_buffer_memory, 0, VK_WHOLE_SIZE, 0, &data));
+	memcpy((byte*)data + vertex_buffer_offset, vbo_data, vbo_size);
+	qvkUnmapMemory(vk.device, staging_buffer_memory);
+
+	command_buffer = begin_command_buffer();
+	copyRegion[0].srcOffset = 0;
+	copyRegion[0].dstOffset = 0;
+	copyRegion[0].size = vbo_size;
+	qvkCmdCopyBuffer( command_buffer, staging_vertex_buffer, tr.vbos[tr.numVBOs]->buffer, 1, &copyRegion[0] );
+	end_command_buffer( command_buffer, __func__ );
+
+	qvkDestroyBuffer(vk.device, staging_vertex_buffer, NULL);
+	qvkFreeMemory(vk.device, staging_buffer_memory, NULL);
+
+	SET_OBJECT_NAME( tr.vbos[tr.numVBOs]->buffer, va( "static VBO[%d] %s", tr.numVBOs, name ), VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT );
+	SET_OBJECT_NAME( tr.vbos[tr.numVBOs]->memory, va( "static VBO[%d] memory %s", tr.numVBOs, name ), VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_MEMORY_EXT );
+
+	vbo->index = tr.numVBOs++;
+	vbo->index++;
+	vbo->size = vbo_size;
+	return vbo;
+}
+#endif
 #endif
 
 #include "shaders/spirv/shader_data.c"
@@ -4416,6 +4643,10 @@ void vk_initialize( void )
 		if ( r_specularMapping->integer )
 			vk.specularMappingActive = qtrue;
 
+#ifdef USE_VBO_MDV
+		vk.vboMdvActive = qtrue;
+#endif
+
 #ifdef VK_CUBEMAP
 		if ( r_cubeMapping->integer )
 			vk.cubemapActive = qtrue;
@@ -5028,6 +5259,9 @@ void vk_shutdown( refShutdownCode_t code )
 
 #ifdef USE_VBO
 	vk_release_vbo();
+#endif
+#ifdef USE_VK_PBR
+	vk_release_model_vbo_all();
 #endif
 
 	vk_clean_staging_buffer();
