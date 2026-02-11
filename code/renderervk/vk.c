@@ -137,6 +137,10 @@ static PFN_vkCmdDispatch								qvkCmdDispatch;
 static PFN_vkCreateComputePipelines						qvkCreateComputePipelines;
 #endif
 
+#ifdef USE_VK_PBR
+static PFN_vkCmdDrawIndexedIndirect						qvkCmdDrawIndexedIndirect;
+#endif
+
 ////////////////////////////////////////////////////////////////////////////
 
 // forward declaration
@@ -1891,6 +1895,9 @@ static qboolean vk_create_device( VkPhysicalDevice physical_device, int device_i
 #ifdef USE_VK_PBR
 		if ( device_features.geometryShader )
 			features.geometryShader = VK_TRUE;
+
+		if ( device_features.multiDrawIndirect )
+			features.multiDrawIndirect = VK_TRUE;
 #endif
 		if ( r_ext_texture_filter_anisotropic->integer && device_features.samplerAnisotropy ) {
 			features.samplerAnisotropy = VK_TRUE;
@@ -2219,6 +2226,10 @@ static void init_vulkan_library( void )
 	INIT_DEVICE_FUNCTION(vkCmdDispatch)
 	INIT_DEVICE_FUNCTION(vkCreateComputePipelines)
 #endif
+
+#ifdef USE_VK_PBR
+	INIT_DEVICE_FUNCTION(vkCmdDrawIndexedIndirect)
+#endif
 }
 
 #undef INIT_INSTANCE_FUNCTION
@@ -2347,6 +2358,10 @@ static void deinit_device_functions( void )
 #ifdef VK_COMPUTE_NORMALMAP
 	qvkCmdDispatch								= NULL;
 	qvkCreateComputePipelines					= NULL;
+#endif
+
+#ifdef USE_VK_PBR
+	qvkCmdDrawIndexedIndirect					= NULL;
 #endif
 }
 
@@ -2788,6 +2803,67 @@ static void vk_create_geometry_buffers( VkDeviceSize size )
 	Com_Memset( &vk.stats, 0, sizeof( vk.stats ) );
 }
 
+#ifdef USE_VK_PBR
+static void vk_create_indirect_buffer( VkDeviceSize size )
+{
+	VkMemoryRequirements vb_memory_requirements;
+	VkDeviceSize indirect_buffer_offset;
+	VkMemoryAllocateInfo alloc_info;
+	VkBufferCreateInfo desc;
+	uint32_t memory_type_bits;
+	void *data;
+	int i;
+
+	//vk_debug("Create indirect buffer: vk.cmd->indirect_buffer \n");
+	
+	desc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	desc.pNext = NULL;
+	desc.flags = 0;
+	desc.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	desc.queueFamilyIndexCount = 0;
+	desc.pQueueFamilyIndices = NULL;
+	
+	Com_Memset(&vb_memory_requirements, 0, sizeof(vb_memory_requirements));
+
+	for (i = 0; i < NUM_COMMAND_BUFFERS; i++) {
+		desc.size = size;
+		desc.usage = VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
+		VK_CHECK(qvkCreateBuffer(vk.device, &desc, NULL, &vk.tess[i].indirect_buffer));
+
+		qvkGetBufferMemoryRequirements(vk.device, vk.tess[i].indirect_buffer, &vb_memory_requirements);
+	}
+
+	memory_type_bits = vb_memory_requirements.memoryTypeBits;
+
+	alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	alloc_info.pNext = NULL;
+	alloc_info.allocationSize = vb_memory_requirements.size * NUM_COMMAND_BUFFERS;
+	alloc_info.memoryTypeIndex = find_memory_type(memory_type_bits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+	//vk_debug("Allocate device memory for Indirect Buffer: %ld bytes. \n", alloc_info.allocationSize);
+
+	VK_CHECK(qvkAllocateMemory(vk.device, &alloc_info, NULL, &vk.indirect_buffer_memory));
+	VK_CHECK(qvkMapMemory(vk.device, vk.indirect_buffer_memory, 0, VK_WHOLE_SIZE, 0, &data));
+
+	indirect_buffer_offset = 0;
+
+	for (i = 0; i < NUM_COMMAND_BUFFERS; i++) {
+		qvkBindBufferMemory(vk.device, vk.tess[i].indirect_buffer, vk.indirect_buffer_memory, indirect_buffer_offset);
+		vk.tess[i].indirect_buffer_ptr = (byte*)data + indirect_buffer_offset;
+		vk.tess[i].indirect_buffer_offset = 0;
+		indirect_buffer_offset += vb_memory_requirements.size;
+
+		SET_OBJECT_NAME(vk.tess[i].indirect_buffer, "indirect_buffer", VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT);
+	}
+
+	SET_OBJECT_NAME(vk.indirect_buffer_memory, "indirect buffer memory", VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_EXT);
+
+	vk.indirect_buffer_size = vb_memory_requirements.size;
+	vk.indirect_buffer_size_new = 0;
+
+	//Com_Memset(&vk.stats, 0, sizeof(vk.stats));
+}
+#endif
 
 static void vk_create_storage_buffer( uint32_t size )
 {
@@ -2831,6 +2907,7 @@ static void vk_create_storage_buffer( uint32_t size )
 	SET_OBJECT_NAME( vk.storage.descriptor, "storage buffer", VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_SET_EXT );
 	SET_OBJECT_NAME( vk.storage.memory, "storage buffer memory", VK_DEBUG_REPORT_OBJECT_TYPE_DEVICE_MEMORY_EXT );
 }
+
 
 
 #ifdef USE_VBO
@@ -4919,6 +4996,13 @@ void vk_initialize( void )
 	vk_create_geometry_buffers( vk.geometry_buffer_size_new );
 	vk.geometry_buffer_size_new = 0;
 
+
+#ifdef USE_VK_PBR
+	vk.indirect_buffer_size_new = sizeof(VkDrawIndexedIndirectCommand) * 1024 * 1024;
+	vk_create_indirect_buffer( vk.indirect_buffer_size_new );
+#endif
+
+
 	vk_create_storage_buffer( MAX_FLARES * vk.storage_alignment );
 
 	vk_create_shader_modules();
@@ -5200,7 +5284,7 @@ static void vk_destroy_pipelines( qboolean resetCounter )
 void vk_shutdown( refShutdownCode_t code )
 {
 #ifdef USE_VK_PBR
-	int i, j, k, l, m, p;
+	int i, j, k, l, m, p, q;
 #else
 	int i, j, k, l;
 #endif
@@ -5276,22 +5360,24 @@ void vk_shutdown( refShutdownCode_t code )
 	qvkFreeMemory( vk.device, vk.storage.memory, NULL );
 
 #ifdef USE_VK_PBR
-	for (i = 0; i < 2; i++) {
-        for ( p = 0; p < 4; p++ ) {
-			for (j = 0; j < 3; j++) {
-				for (k = 0; k < 2; k++) {
-					for (l = 0; l < 2; l++) {
-						for (m = 0; m < 2; m++) {
-							if (vk.modules.vert.gen[i][p][j][k][l][m] != VK_NULL_HANDLE) {
-								qvkDestroyShaderModule(vk.device, vk.modules.vert.gen[i][p][j][k][l][m], NULL);
-								vk.modules.vert.gen[i][p][j][k][l][m] = VK_NULL_HANDLE;
+	for (q = 0; q < 2; q++) {
+		for (i = 0; i < 2; i++) {
+			for ( p = 0; p < 4; p++ ) {
+				for (j = 0; j < 3; j++) {
+					for (k = 0; k < 2; k++) {
+						for (l = 0; l < 2; l++) {
+							for (m = 0; m < 2; m++) {
+								if (vk.modules.vert.gen[q][i][p][j][k][l][m] != VK_NULL_HANDLE) {
+									qvkDestroyShaderModule(vk.device, vk.modules.vert.gen[q][i][p][j][k][l][m], NULL);
+									vk.modules.vert.gen[q][i][p][j][k][l][m] = VK_NULL_HANDLE;
+								}
 							}
 						}
 					}
 				}
 			}
 		}
-    }
+	}
     for (i = 0; i < 2; i++) {
         for ( p = 0; p < 4; p++ ) {
 			for (j = 0; j < 3; j++) {
@@ -5350,8 +5436,10 @@ void vk_shutdown( refShutdownCode_t code )
 			for ( j = 0; j < 2; j++ ) {
 				for ( k = 0; k < 2; k++ ) {
 					for ( m = 0; m < 2; m++ ) {
-						qvkDestroyShaderModule( vk.device, vk.modules.vert.ident1[i][p][j][k][m], NULL );
-						vk.modules.vert.ident1[i][p][j][k][m] = VK_NULL_HANDLE;
+						for ( q = 0; q < 2; q++ ) {
+							qvkDestroyShaderModule( vk.device, vk.modules.vert.ident1[q][i][p][j][k][m], NULL );
+							vk.modules.vert.ident1[q][i][p][j][k][m] = VK_NULL_HANDLE;
+						}
 					}
 					qvkDestroyShaderModule( vk.device, vk.modules.frag.ident1[i][p][j][k], NULL );
 					vk.modules.frag.ident1[i][p][j][k] = VK_NULL_HANDLE;
@@ -5361,12 +5449,14 @@ void vk_shutdown( refShutdownCode_t code )
 	}
 
 	for ( i = 0; i < 2; i++ ) {
-        for ( p = 0; p < 4; p++ ) {
+		for ( p = 0; p < 4; p++ ) {
 			for ( j = 0; j < 2; j++ ) {
 				for ( k = 0; k < 2; k++ ) {
 					for ( m = 0; m < 2; m++ ) {
-						qvkDestroyShaderModule( vk.device, vk.modules.vert.fixed[i][p][j][k][m], NULL );
-						vk.modules.vert.fixed[i][p][j][k][m] = VK_NULL_HANDLE;
+						for ( q = 0; q < 2; q++ ) {
+							qvkDestroyShaderModule( vk.device, vk.modules.vert.fixed[q][i][p][j][k][m], NULL );
+							vk.modules.vert.fixed[q][i][p][j][k][m] = VK_NULL_HANDLE;
+						}
 					}
 					qvkDestroyShaderModule( vk.device, vk.modules.frag.fixed[i][p][j][k], NULL );
 					vk.modules.frag.fixed[i][p][j][k] = VK_NULL_HANDLE;
@@ -5514,6 +5604,9 @@ void vk_release_resources( void ) {
 	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
 		vk.tess[i].uniform_read_offset = 0;
 		vk.tess[i].vertex_buffer_offset = 0;
+#ifdef USE_VK_PBR
+		vk.tess[i].indirect_buffer_offset = 0;
+#endif
 	}
 
 	Com_Memset( vk.cmd->buf_offset, 0, sizeof( vk.cmd->buf_offset ) );
@@ -6376,10 +6469,22 @@ static VkVertexInputAttributeDescription attribs[8];
 static uint32_t num_binds;
 static uint32_t num_attrs;
 
+#ifdef USE_VK_PBR
+static qboolean is_mdv_vbo;
+
+static uint32_t vk_bind_stride( uint32_t in ) 
+{
+    if ( is_mdv_vbo )
+        return get_mdv_stride();
+
+    return in;
+}
+#endif
+
 static void push_bind( uint32_t binding, uint32_t stride )
 {
 	bindings[ num_binds ].binding = binding;
-	bindings[ num_binds ].stride = stride;
+	bindings[ num_binds ].stride = vk_bind_stride( stride );
 	bindings[ num_binds ].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 	num_binds++;
 }
@@ -6457,8 +6562,8 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
     const int fastlight = vk.useFastLight ? 1 : 0;
 	//const int use_pbr = def->vk_pbr_flags ? 1 : 0;
 
-	if ( def->vk_pbr_flags )
-		Com_Printf("hi");
+    int vbo = 0;
+    if ( def->vbo_mdv )     vbo = 1;
 
 	switch ( def->shader_type ) {
 
@@ -6474,99 +6579,99 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 
 		case TYPE_SIGNLE_TEXTURE_DF:
 			state_bits |= GLS_DEPTHMASK_TRUE;
-			vs_module = &vk.modules.vert.ident1[fastlight][light][0][0][0];
+			vs_module = &vk.modules.vert.ident1[vbo][fastlight][light][0][0][0];
 			fs_module = &vk.modules.frag.gen0_df;
 			break;
 
 		case TYPE_SIGNLE_TEXTURE_FIXED_COLOR:
-			vs_module = &vk.modules.vert.fixed[fastlight][light][0][0][0];
+			vs_module = &vk.modules.vert.fixed[vbo][fastlight][light][0][0][0];
 			fs_module = &vk.modules.frag.fixed[fastlight][light][0][0];
 			break;
 
 		case TYPE_SIGNLE_TEXTURE_FIXED_COLOR_ENV:
-			vs_module = &vk.modules.vert.fixed[fastlight][light][0][1][0];
+			vs_module = &vk.modules.vert.fixed[vbo][fastlight][light][0][1][0];
 			fs_module = &vk.modules.frag.fixed[fastlight][light][0][0];
 			break;
 
 		case TYPE_SIGNLE_TEXTURE_ENT_COLOR:
-			vs_module = &vk.modules.vert.fixed[fastlight][light][0][0][0];
+			vs_module = &vk.modules.vert.fixed[vbo][fastlight][light][0][0][0];
 			fs_module = &vk.modules.frag.ent[fastlight][0][0][0];
 			break;
 
 		case TYPE_SIGNLE_TEXTURE_ENT_COLOR_ENV:
-			vs_module = &vk.modules.vert.fixed[fastlight][light][0][1][0];
+			vs_module = &vk.modules.vert.fixed[vbo][fastlight][light][0][1][0];
 			fs_module = &vk.modules.frag.ent[fastlight][0][0][0];
 			break;
 
 		case TYPE_SIGNLE_TEXTURE:
-			vs_module = &vk.modules.vert.gen[fastlight][light][0][0][0][0];
+			vs_module = &vk.modules.vert.gen[vbo][fastlight][light][0][0][0][0];
 			fs_module = &vk.modules.frag.gen[fastlight][light][0][0][0];
 			break;
 
 		case TYPE_SIGNLE_TEXTURE_ENV:
-			vs_module = &vk.modules.vert.gen[fastlight][light][0][0][1][0];
+			vs_module = &vk.modules.vert.gen[vbo][fastlight][light][0][0][1][0];
 			fs_module = &vk.modules.frag.gen[fastlight][light][0][0][0];
 			break;
 
 		case TYPE_SIGNLE_TEXTURE_IDENTITY:
-			vs_module = &vk.modules.vert.ident1[fastlight][light][0][0][0];
+			vs_module = &vk.modules.vert.ident1[vbo][fastlight][light][0][0][0];
 			fs_module = &vk.modules.frag.ident1[fastlight][light][0][0];
 			break;
 
 		case TYPE_SIGNLE_TEXTURE_IDENTITY_ENV:
-			vs_module = &vk.modules.vert.ident1[fastlight][light][0][1][0];
+			vs_module = &vk.modules.vert.ident1[vbo][fastlight][light][0][1][0];
 			fs_module = &vk.modules.frag.ident1[fastlight][light][0][0];
 			break;
 
 		case TYPE_MULTI_TEXTURE_ADD2_IDENTITY:
 		case TYPE_MULTI_TEXTURE_MUL2_IDENTITY:
-			vs_module = &vk.modules.vert.ident1[fastlight][light][1][0][0];
+			vs_module = &vk.modules.vert.ident1[vbo][fastlight][light][1][0][0];
 			fs_module = &vk.modules.frag.ident1[fastlight][light][1][0];
 			break;
 
 		case TYPE_MULTI_TEXTURE_ADD2_IDENTITY_ENV:
 		case TYPE_MULTI_TEXTURE_MUL2_IDENTITY_ENV:
-			vs_module = &vk.modules.vert.ident1[fastlight][light][1][1][0];
+			vs_module = &vk.modules.vert.ident1[vbo][fastlight][light][1][1][0];
 			fs_module = &vk.modules.frag.ident1[fastlight][light][1][0];
 			break;
 
 		case TYPE_MULTI_TEXTURE_ADD2_FIXED_COLOR:
 		case TYPE_MULTI_TEXTURE_MUL2_FIXED_COLOR:
-			vs_module = &vk.modules.vert.fixed[fastlight][light][1][0][0];
+			vs_module = &vk.modules.vert.fixed[vbo][fastlight][light][1][0][0];
 			fs_module = &vk.modules.frag.fixed[fastlight][light][1][0];
 			break;
 
 		case TYPE_MULTI_TEXTURE_ADD2_FIXED_COLOR_ENV:
 		case TYPE_MULTI_TEXTURE_MUL2_FIXED_COLOR_ENV:
-			vs_module = &vk.modules.vert.fixed[fastlight][light][1][1][0];
+			vs_module = &vk.modules.vert.fixed[vbo][fastlight][light][1][1][0];
 			fs_module = &vk.modules.frag.fixed[fastlight][light][1][0];
 			break;
 
 		case TYPE_MULTI_TEXTURE_MUL2:
 		case TYPE_MULTI_TEXTURE_ADD2_1_1:
 		case TYPE_MULTI_TEXTURE_ADD2:
-			vs_module = &vk.modules.vert.gen[fastlight][light][1][0][0][0];
+			vs_module = &vk.modules.vert.gen[vbo][fastlight][light][1][0][0][0];
 			fs_module = &vk.modules.frag.gen[fastlight][light][1][0][0];
 			break;
 
 		case TYPE_MULTI_TEXTURE_MUL2_ENV:
 		case TYPE_MULTI_TEXTURE_ADD2_1_1_ENV:
 		case TYPE_MULTI_TEXTURE_ADD2_ENV:
-			vs_module = &vk.modules.vert.gen[fastlight][light][1][0][1][0];
+			vs_module = &vk.modules.vert.gen[vbo][fastlight][light][1][0][1][0];
 			fs_module = &vk.modules.frag.gen[fastlight][light][1][0][0];
 			break;
 
 		case TYPE_MULTI_TEXTURE_MUL3:
 		case TYPE_MULTI_TEXTURE_ADD3_1_1:
 		case TYPE_MULTI_TEXTURE_ADD3:
-			vs_module = &vk.modules.vert.gen[fastlight][light][2][0][0][0];
+			vs_module = &vk.modules.vert.gen[vbo][fastlight][light][2][0][0][0];
 			fs_module = &vk.modules.frag.gen[fastlight][light][2][0][0];
 			break;
 
 		case TYPE_MULTI_TEXTURE_MUL3_ENV:
 		case TYPE_MULTI_TEXTURE_ADD3_1_1_ENV:
 		case TYPE_MULTI_TEXTURE_ADD3_ENV:
-			vs_module = &vk.modules.vert.gen[fastlight][light][2][0][1][0];
+			vs_module = &vk.modules.vert.gen[vbo][fastlight][light][2][0][1][0];
 			fs_module = &vk.modules.frag.gen[fastlight][light][2][0][0];
 			break;
 
@@ -6577,7 +6682,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 		case TYPE_BLEND2_MIX_ALPHA:
 		case TYPE_BLEND2_MIX_ONE_MINUS_ALPHA:
 		case TYPE_BLEND2_DST_COLOR_SRC_ALPHA:
-			vs_module = &vk.modules.vert.gen[fastlight][light][1][1][0][0];
+			vs_module = &vk.modules.vert.gen[vbo][fastlight][light][1][1][0][0];
 			fs_module = &vk.modules.frag.gen[fastlight][light][1][1][0];
 			break;
 
@@ -6588,7 +6693,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 		case TYPE_BLEND2_MIX_ALPHA_ENV:
 		case TYPE_BLEND2_MIX_ONE_MINUS_ALPHA_ENV:
 		case TYPE_BLEND2_DST_COLOR_SRC_ALPHA_ENV:
-			vs_module = &vk.modules.vert.gen[fastlight][light][1][1][1][0];
+			vs_module = &vk.modules.vert.gen[vbo][fastlight][light][1][1][1][0];
 			fs_module = &vk.modules.frag.gen[fastlight][light][1][1][0];
 			break;
 
@@ -6599,7 +6704,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 		case TYPE_BLEND3_MIX_ALPHA:
 		case TYPE_BLEND3_MIX_ONE_MINUS_ALPHA:
 		case TYPE_BLEND3_DST_COLOR_SRC_ALPHA:
-			vs_module = &vk.modules.vert.gen[fastlight][light][2][1][0][0];
+			vs_module = &vk.modules.vert.gen[vbo][fastlight][light][2][1][0][0];
 			fs_module = &vk.modules.frag.gen[fastlight][light][2][1][0];
 			break;
 
@@ -6610,7 +6715,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 		case TYPE_BLEND3_MIX_ALPHA_ENV:
 		case TYPE_BLEND3_MIX_ONE_MINUS_ALPHA_ENV:
 		case TYPE_BLEND3_DST_COLOR_SRC_ALPHA_ENV:
-			vs_module = &vk.modules.vert.gen[fastlight][light][2][1][1][0];
+			vs_module = &vk.modules.vert.gen[vbo][fastlight][light][2][1][1][0];
 			fs_module = &vk.modules.frag.gen[fastlight][light][2][1][0];
 			break;
 
@@ -7066,6 +7171,10 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	num_binds = num_attrs = 0;
 	qboolean has_normal = qfalse;
 
+#ifdef USE_VBO_MDV
+	is_mdv_vbo = def->vbo_mdv;
+#endif
+
 	switch ( def->shader_type ) {
 
 		case TYPE_FOG_ONLY:
@@ -7327,7 +7436,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	{
 		if ( !has_normal )
 		{
-			if ( (def->vk_light_flags && !vk.useFastLight) ) 
+			if ( (def->vk_light_flags && !vk.useFastLight) || def->vbo_mdv ) 
 			{
 				push_bind( 5, sizeof( vec4_t ) );					// normals
 				push_attr( 5, 5, VK_FORMAT_R32G32B32A32_SFLOAT );
@@ -7956,6 +8065,18 @@ void vk_bind_index_buffer( VkBuffer buffer, uint32_t offset )
 	vk.cmd->curr_index_offset = offset;
 }
 
+#ifdef USE_VK_PBR
+void vk_draw_indexed_indirect( uint32_t first_offset, uint32_t num_draws )
+{
+	qvkCmdDrawIndexedIndirect( 
+		vk.cmd->command_buffer, 
+		vk.cmd->indirect_buffer,
+		first_offset,
+		tess.multiDrawPrimitives,
+		sizeof(VkDrawIndexedIndirectCommand)
+	);
+}
+#endif
 
 #ifdef USE_VBO
 void vk_draw_indexed( uint32_t indexCount, uint32_t firstIndex )
@@ -7968,6 +8089,15 @@ void vk_draw_indexed( uint32_t indexCount, uint32_t firstIndex )
 void vk_bind_index( void )
 {
 #ifdef USE_VBO
+#ifdef USE_VK_PBR
+	if ( tess.vbo_model )
+	{
+		//vk_bind_index_buffer( tess.ibo_model->buffer,  drawItem.draw.params.indexed.index_offset );
+		vk_bind_index_buffer( tess.ibo_model->buffer, 0 );
+		return;
+	}
+	else
+#endif
 	if ( tess.vboIndex ) {
 		vk.cmd->num_indexes = 0;
 		//qvkCmdBindIndexBuffer( vk.cmd->command_buffer, vk.vbo.index_buffer, tess.shader->iboOffset, VK_INDEX_TYPE_UINT32 );
@@ -7991,6 +8121,34 @@ void vk_bind_index_ext( const int numIndexes, const uint32_t *indexes )
 	}
 }
 
+#ifdef USE_VBO_MDV
+static void vk_vbo_bind_geometry_mdv( int32_t flags )
+{
+	VBO_t *vbo = tess.vbo_model;
+
+	shade_bufs[0] = shade_bufs[1] = shade_bufs[2] = shade_bufs[3] = shade_bufs[4] = shade_bufs[5] = shade_bufs[6] = shade_bufs[7] = shade_bufs[8] = shade_bufs[9] = vbo->buffer;
+	
+	Com_Memset( vk.cmd->vbo_offset, 0, sizeof(vk.cmd->vbo_offset) );
+
+	vk.cmd->vbo_offset[0] = vbo->offsets[0];	// xyz
+	vk.cmd->vbo_offset[2] = vbo->offsets[2];	// texture coords
+	vk.cmd->vbo_offset[5] = vbo->offsets[5];	// normals
+
+	if (flags & TESS_ST1)
+		vk.cmd->vbo_offset[3] = vbo->offsets[2];
+
+	if (flags & TESS_ST2)
+		vk.cmd->vbo_offset[4] = vbo->offsets[2];
+
+	if (flags & TESS_TANGENT)
+		vk.cmd->vbo_offset[8] = vbo->offsets[8];
+
+	bind_base = 0;
+	bind_count = 10;
+
+	qvkCmdBindVertexBuffers( vk.cmd->command_buffer, bind_base, bind_count, shade_bufs, vk.cmd->vbo_offset + bind_base );
+}
+#endif
 
 void vk_bind_geometry( uint32_t flags )
 {
@@ -8002,6 +8160,20 @@ void vk_bind_geometry( uint32_t flags )
 		return;
 
 #ifdef USE_VBO
+#ifdef USE_VK_PBR
+	if ( tess.vbo_model ) {
+		Com_Memset( vk.cmd->vbo_offset, 0, sizeof(vk.cmd->vbo_offset) );
+
+		switch (tess.surfType) {
+#ifdef USE_VBO_MDV
+			case SF_VBO_MDVMESH:return vk_vbo_bind_geometry_mdv( flags );
+#endif
+		}
+
+		return;
+	}
+#endif
+
 	if ( tess.vboIndex ) {
 
 		shade_bufs[0] = shade_bufs[1] = shade_bufs[2] = shade_bufs[3] = shade_bufs[4] = shade_bufs[5] = shade_bufs[6] = shade_bufs[7] = vk.vbo.vertex_buffer;
@@ -8253,6 +8425,37 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 
 	// issue draw call(s)
 #ifdef USE_VBO
+#if defined(USE_VK_PBR)
+	if ( tess.vbo_model )
+	{
+		if ( tess.multiDrawPrimitives ) 
+		{
+			// draw indexed indirect
+			if ( tess.multiDrawPrimitives > 1 ) 
+			{
+#if 0
+				vk_bind_index_buffer( tess.ibo_model->buffer, 0 );
+
+				qvkCmdDrawIndexedIndirect( 
+					vk.cmd->command_buffer, 
+					vk.cmd->indirect_buffer,
+					vk.cmd->indirect.offset,
+					vk.cmd->indirect.numDraws,
+					sizeof(VkDrawIndexedIndirectCommand)
+					);
+#endif
+				return;
+			}
+
+			//vk_bind_index_buffer( tess.ibo_model->buffer, vk.cmd->indexed.index_offset );
+			vk_bind_index_buffer( tess.ibo_model->buffer, 0 );
+			qvkCmdDrawIndexed( vk.cmd->command_buffer, vk.cmd->indexed.num_indexes, 1, 0, 0, 0 );
+			return;
+		}
+	} 
+	
+	else
+#endif
 	if ( tess.vboIndex )
 		VBO_RenderIBOItems();
 	else
@@ -8600,6 +8803,9 @@ _retry:
 	// dynamic vertex buffer layout
 	vk.cmd->uniform_read_offset = 0;
 	vk.cmd->vertex_buffer_offset = 0;
+#ifdef USE_VK_PBR
+	vk.cmd->indirect_buffer_offset = 0;
+#endif
 	Com_Memset( vk.cmd->buf_offset, 0, sizeof( vk.cmd->buf_offset ) );
 	Com_Memset( vk.cmd->vbo_offset, 0, sizeof( vk.cmd->vbo_offset ) );
 	vk.cmd->curr_index_buffer = VK_NULL_HANDLE;

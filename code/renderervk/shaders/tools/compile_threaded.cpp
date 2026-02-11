@@ -200,8 +200,11 @@ static void create_shader_task( const char *f_name, const char *stage, const cha
 
 static void compile_and_convert_template_shaders( void )
 {
-    uint32_t i, j, k, l, m, n, o, p;
+    uint32_t i, j, k, l, m, n, o, p, q;
     std::string defines, name, ids, defines_cl, name_cl, ids_cl;
+
+    const char* vbo_flags[]         = { "", "-DUSE_VBO_MDV" };
+    const char* vbo_ids[]           = { "", "mdv_" };
 
     const char* mode_flags[]       = { "-DUSE_CLX_IDENT", "-DUSE_FIXED_COLOR", };
     const char* mode_ids[]         = { "ident1", "fixed" };
@@ -244,17 +247,19 @@ static void compile_and_convert_template_shaders( void )
     create_shader_task( "gen_frag.tmpl", "frag", "frag_pbr_tx0_ent_fog", NULL, "-DUSE_ENT_COLOR -DUSE_ATEST  -DUSE_FOG  -DUSE_VK_PBR");
 
     // ident / fixed vertex shaders
-    for ( i = 0; i < ARRAY_LEN(fastlight_flags); ++i ) { // fastlight
-        for ( p = 0; p < ARRAY_LEN(light_flags); ++p ) { // light
-            for ( j = 0; j < (ARRAY_LEN(tx_flags) - 1); ++j ) { // tx [0,1 only]
-                for ( m = 0; m < ARRAY_LEN(mode_flags); ++m ) { // mode (ident / fixed)
-                    for ( k = 0; k < ARRAY_LEN(env_flags); ++k ) { // env
-                        for ( l = 0; l < ARRAY_LEN(fog_flags); ++l ) { // fog
-                            defines = join_flags({ fastlight_flags[i], light_flags[p], tx_flags[j], mode_flags[m], env_flags[k], fog_flags[l] });
-                            name    = "vert_" + std::string(fastlight_ids[i]) + light_ids[p] + tx_ids[j] + "_" + mode_ids[m] + env_ids[k] + fog_ids[l];
-                            ids     = join_indexes("vk.modules.vert." + std::string(mode_ids[m]), { i, p, j, k, l });
+    for ( q = 0; q < ARRAY_LEN(vbo_flags); ++q ) { // vbo
+        for ( i = 0; i < ARRAY_LEN(fastlight_flags); ++i ) { // fastlight
+            for ( p = 0; p < ARRAY_LEN(light_flags); ++p ) { // light
+                for ( j = 0; j < (ARRAY_LEN(tx_flags) - 1); ++j ) { // tx [0,1 only]
+                    for ( m = 0; m < ARRAY_LEN(mode_flags); ++m ) { // mode (ident / fixed)
+                        for ( k = 0; k < ARRAY_LEN(env_flags); ++k ) { // env
+                            for ( l = 0; l < ARRAY_LEN(fog_flags); ++l ) { // fog
+                                defines = join_flags({ vbo_flags[q], fastlight_flags[i], light_flags[p], tx_flags[j], mode_flags[m], env_flags[k], fog_flags[l] });
+                                name    = "vert_" + std::string(vbo_ids[q]) + fastlight_ids[i] + light_ids[p] + tx_ids[j] + "_" + mode_ids[m] + env_ids[k] + fog_ids[l];
+                                ids     = join_indexes("vk.modules.vert." + std::string(mode_ids[m]), { q, i, p, j, k, l });
 
-                            create_shader_task("gen_vert.tmpl", "vert", name.c_str(), ids.c_str(), defines.c_str());
+                                create_shader_task("gen_vert.tmpl", "vert", name.c_str(), ids.c_str(), defines.c_str());
+                            }
                         }
                     }
                 }
@@ -286,24 +291,26 @@ static void compile_and_convert_template_shaders( void )
 
 
     // generic vertex shaders
-    for ( i = 0; i < ARRAY_LEN(fastlight_flags); ++i ) { // fastlight
-        for ( p = 0; p < ARRAY_LEN(light_flags); ++p ) { // light
-            for ( j = 0; j < ARRAY_LEN(tx_flags); ++j ) { // tx
-                for ( k = 0; k < ARRAY_LEN(env_flags); ++k ) { // env
-                    for ( l = 0; l < ARRAY_LEN(fog_flags); ++l ) { // fog
-                        defines = join_flags({ fastlight_flags[i], light_flags[p], tx_flags[j], env_flags[k], fog_flags[l] });
-                        name    = "vert_" + std::string(fastlight_ids[i]) + light_ids[p] + tx_ids[j] + env_ids[k] + fog_ids[l];
-                        ids     = join_indexes("vk.modules.vert.gen", { i, p, j, 0, k, l });
+    for ( q = 0; q < ARRAY_LEN(vbo_flags); ++q ) { // vbo
+        for ( i = 0; i < ARRAY_LEN(fastlight_flags); ++i ) { // fastlight
+            for ( p = 0; p < ARRAY_LEN(light_flags); ++p ) { // light
+                for ( j = 0; j < ARRAY_LEN(tx_flags); ++j ) { // tx
+                    for ( k = 0; k < ARRAY_LEN(env_flags); ++k ) { // env
+                        for ( l = 0; l < ARRAY_LEN(fog_flags); ++l ) { // fog
+                            defines = join_flags({ vbo_flags[q], fastlight_flags[i], light_flags[p], tx_flags[j], env_flags[k], fog_flags[l] });
+                            name    = "vert_" + std::string(vbo_ids[q]) + fastlight_ids[i] + light_ids[p] + tx_ids[j] + env_ids[k] + fog_ids[l];
+                            ids     = join_indexes("vk.modules.vert.gen", { q, i, p, j, 0, k, l });
 
-                        create_shader_task("gen_vert.tmpl", "vert", name.c_str(), ids.c_str(), defines.c_str());
+                            create_shader_task("gen_vert.tmpl", "vert", name.c_str(), ids.c_str(), defines.c_str());
 
-                        if ( j != 0 ) // tx
-                        { 
-                            defines_cl = join_flags({ fastlight_flags[i], light_flags[p], tx_flags[j], cl_flags[j], env_flags[k], fog_flags[l] });
-                            name_cl    = "vert_" + std::string(fastlight_ids[i]) + light_ids[p] + tx_ids[j] + "_" + cl_ids[j] + env_ids[k] + fog_ids[l];
-                            ids_cl     = join_indexes("vk.modules.vert.gen", { i, p, j, 1, k, l });
+                            if ( j != 0 ) // tx
+                            { 
+                                defines_cl = join_flags({ vbo_flags[q], fastlight_flags[i], light_flags[p], tx_flags[j], cl_flags[j], env_flags[k], fog_flags[l] });
+                                name_cl    = "vert_" + std::string(vbo_ids[q]) + fastlight_ids[i] + light_ids[p] + tx_ids[j] + "_" + cl_ids[j] + env_ids[k] + fog_ids[l];
+                                ids_cl     = join_indexes("vk.modules.vert.gen", { q, i, p, j, 1, k, l });
 
-                            create_shader_task("gen_vert.tmpl", "vert", name_cl.c_str(), ids_cl.c_str(), defines_cl.c_str());
+                                create_shader_task("gen_vert.tmpl", "vert", name_cl.c_str(), ids_cl.c_str(), defines_cl.c_str());
+                            }
                         }
                     }
                 }

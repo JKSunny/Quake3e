@@ -8,6 +8,10 @@
 	#define PER_PIXEL_LIGHTING 
 #endif
 
+#if defined(USE_VBO_MDV)
+	#define USE_VBO_MODEL
+
+#endif
 #ifdef USE_TX2
 #define USE_TX1
 #endif
@@ -79,42 +83,48 @@ layout(location = 3) in vec2 in_tex_coord1;
 layout(location = 4) in vec2 in_tex_coord2;
 #endif
 
-#if defined(PER_PIXEL_LIGHTING) || defined(USE_ENV)
+#if defined(PER_PIXEL_LIGHTING) || defined(USE_ENV) || defined(USE_VBO_MDV)
 	layout(location = 5) in vec3 in_normal;
 #elif defined(USE_LIGHT_VECTOR) && defined(USE_FAST_LIGHT)
 	layout(location = 5) in vec3 in_normal;
 #endif
 
 #if defined (USE_CLX_IDENT) || defined (USE_FIXED_COLOR)
-// use either 1.0 or fixed (rgb+a) color from spec.constants
+	// use either 1.0 or fixed (rgb+a) color from spec.constants
 #else
-layout(location = 1) in vec4 in_color0;
-#ifdef USE_CL1
-layout(location = 6) in vec4 in_color1;
-#endif
-#ifdef USE_CL2
-layout(location = 7) in vec4 in_color2;
-#endif
+	#if !defined(USE_VBO_MODEL)
+		layout(location = 1) in vec4 in_color0;
+	#endif
 
-layout(location = 0) out vec4 frag_color0;
-#ifdef USE_CL1
-layout(location = 5) out vec4 frag_color1;
-#endif
-#ifdef USE_CL2
-layout(location = 6) out vec4 frag_color2;
-#endif
+	#if defined(USE_CL1) && !defined(USE_VBO_MODEL)
+		layout(location = 6) in vec4 in_color1;
+	#endif
+
+	#if defined(USE_CL2) && !defined(USE_VBO_MODEL)
+		layout(location = 7) in vec4 in_color2;
+	#endif
+
+	layout(location = 0) out vec4 frag_color0;
+
+	#ifdef USE_CL1
+		layout(location = 5) out vec4 frag_color1;
+	#endif
+
+	#ifdef USE_CL2
+		layout(location = 6) out vec4 frag_color2;
+	#endif
 #endif
 
 layout(location = 1) out vec2 frag_tex_coord0;
 #ifdef USE_TX1
-layout(location = 2) out vec2 frag_tex_coord1;
+	layout(location = 2) out vec2 frag_tex_coord1;
 #endif
-#ifdef USE_TX2
-layout(location = 3) out vec2 frag_tex_coord2;
+	#ifdef USE_TX2
+	layout(location = 3) out vec2 frag_tex_coord2;
 #endif
 
 #ifdef USE_FOG
-layout(location = 4) out vec2 fog_tex_coord;
+	layout(location = 4) out vec2 fog_tex_coord;
 #endif
 
 #if defined(PER_PIXEL_LIGHTING)
@@ -130,8 +140,13 @@ out gl_PerVertex {
 };
 
 void main() {
-#if defined(USE_VERTEX_ANIMATION)
-	// ..
+#if defined(USE_VBO_MDV)
+	vec3 position = in_position;
+	vec3 normal = normalize(in_normal);
+
+	#ifdef PER_PIXEL_LIGHTING
+		vec3 tangent = normalize(in_tangent.xyz);
+	#endif
 #elif defined(USE_BONE_ANIMATION)
 	// ..
 #else
@@ -149,13 +164,27 @@ void main() {
 #if defined (USE_CLX_IDENT) || defined (USE_FIXED_COLOR)
 	// use either 1.0 or fixed (rgb+a) color from spec.constants
 #else
-	frag_color0 = in_color0;
-#ifdef USE_CL1
-	frag_color1 = in_color1;
-#endif
-#ifdef USE_CL2
-	frag_color2 = in_color2;
-#endif
+	#if defined(USE_VBO_MODEL)
+		frag_color0 = vec4(1.0, 0.0, 0.0, 1.0);
+	#else
+		frag_color0 = in_color0;
+	#endif
+
+	#ifdef USE_CL1
+		#if defined(USE_VBO_MODEL)
+			frag_color1 = vec4(0.0, 1.0, 0.0, 1.0);
+		#else
+			frag_color1 = in_color1;
+		#endif
+	#endif
+
+	#ifdef USE_CL2
+		#if defined(USE_VBO_MODEL)
+			frag_color2 = vec4(0.0, 0.0, 1.0, 1.0);
+		#else
+			frag_color2 = in_color2;
+		#endif
+	#endif
 #endif
 
 	gl_Position = mvp * vec4(position, 1.0);

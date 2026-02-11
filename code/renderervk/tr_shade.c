@@ -550,6 +550,7 @@ static void ProjectDlightTexture( void ) {
 uint32_t vk_append_uniform( const void *uniform, size_t size, uint32_t min_offset );
 uint32_t vk_push_uniform( const vkUniform_t *uniform );
 #ifdef USE_VK_PBR
+uint32_t vk_push_indirect( int count, const void *data );
 uint32_t vk_push_uniform_global( const vkUniformGlobal_t *uniform );
 #endif
 void VK_SetFogParams( vkUniform_t *uniform, int *fogStage );
@@ -967,10 +968,19 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 #ifdef USE_VULKAN
 #ifdef USE_VK_PBR
 	qboolean is_pbr_surface;
+	qboolean is_mdv_vbo;
 #endif
 	uint32_t pipeline;
 	int fog_stage;
 	qboolean pushUniform;
+
+#ifdef USE_VK_PBR
+	is_mdv_vbo = qfalse;
+
+	if ( tess.vbo_model ) {
+		is_mdv_vbo = (qboolean)( tess.surfType == SF_VBO_MDVMESH );
+	}
+#endif
 
 	vk_bind_index();
 
@@ -1126,18 +1136,77 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 
 				vk.cmd->descriptor_set.offset[VK_DESC_UNIFORM_ENTITY_BINDING] = vk.cmd->entity_ubo_offset[refEntityNum];
 			}
+
+			def.vbo_mdv = is_mdv_vbo;
+			pipeline = vk_find_pipeline_ext( 0, &def, qfalse );
 		}
 #endif
 
 #ifdef USE_VK_PBR
+		
+
 		if ( !is_pbr_surface && pStage->vk_pbr_flags ) {
 			def.vk_pbr_flags = 0;
 			pipeline = vk_find_pipeline_ext( 0, &def, qfalse );
+		}
+
+		if ( backEnd.currentEntity ) {
+			def.vbo_mdv = is_mdv_vbo;	
 		}
 #endif
 
 		vk_bind_pipeline( pipeline );
 		vk_bind_geometry( tess_flags );
+
+
+		if ( tess.vbo_model )
+		{
+			//vk_bind_descriptor_sets();
+
+			// configure pipeline's dynamic state
+			//vk_update_depth_range( tess.depthRange );
+
+			if ( tess.multiDrawPrimitives ) 
+			{
+				// draw indexed indirect
+				if ( tess.multiDrawPrimitives > 1 ) 
+				{
+					uint32_t j, offset;
+					size_t *index;
+
+					vk.cmd->indirect.numDraws = offset;
+
+					for ( j = 0; j < tess.multiDrawPrimitives; j++ ) 
+					{
+						VkDrawIndexedIndirectCommand indirectCmd = { 0 };
+
+						index = (size_t*)tess.multiDrawFirstIndex + j;
+						indirectCmd.indexCount = tess.multiDrawNumIndexes[j];
+						indirectCmd.instanceCount = 1;
+						indirectCmd.firstIndex = (uint32_t)(*index);
+						indirectCmd.vertexOffset = 0;
+						indirectCmd.firstInstance = 0;
+
+						offset = vk_push_indirect( 1, &indirectCmd );
+
+						if ( j  == 0 )
+							vk.cmd->indirect.offset = offset;
+					}
+
+
+					//vk_bind_index_buffer( tess.ibo_model->buffer, 0 );
+					//vk_draw_indexed_indirect( first_offset, tess.multiDrawPrimitives );
+				}
+				else{
+					vk.cmd->indexed.num_indexes = tess.multiDrawNumIndexes[0];
+					vk.cmd->indexed.index_offset = (glIndex_t)(size_t)(tess.multiDrawFirstIndex[0]) * sizeof(uint32_t);
+
+					//vk_bind_index_buffer( tess.ibo_model->buffer, 0 );
+					//vk_draw_indexed( num_indexes, 0 );
+				}
+			}
+		}
+
 		vk_draw_geometry( tess.depthRange, qtrue );
 
 		if ( pStage->depthFragment ) {
@@ -1297,6 +1366,23 @@ uint32_t vk_push_uniform_global( const vkUniformGlobal_t *uniform ) {
 	vk_update_descriptor_offset( VK_DESC_UNIFORM_GLOBAL_BINDING, offset );
 
 	return 0;
+}
+
+uint32_t vk_push_indirect( int count, const void *data ) {
+	const uint32_t offset = vk.cmd->indirect_buffer_offset;	// no alignment for indirect buffer?
+	const uint32_t size = count * sizeof(VkDrawIndexedIndirectCommand);
+
+	if (offset + size > vk.indirect_buffer_size) {
+		// schedule geometry buffer resize
+		vk.indirect_buffer_size_new = log2pad(offset + size, 1);
+		Com_Printf("resize"); //hmmm
+	}
+	else {
+		Com_Memcpy(vk.cmd->indirect_buffer_ptr + offset, data, size);
+		vk.cmd->indirect_buffer_offset = (VkDeviceSize)offset + size;
+	}
+
+	return offset;
 }
 
 #ifdef USE_PMLIGHT

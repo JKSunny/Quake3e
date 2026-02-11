@@ -2333,6 +2333,7 @@ extern void VBO_ClearQueue( void );
 extern void VBO_Flush( void );
 
 #ifdef USE_VK_PBR
+int			get_mdv_stride( void );
 void		vk_release_model_vbo_all( void );
 
 
