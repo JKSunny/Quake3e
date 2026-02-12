@@ -204,6 +204,9 @@ typedef struct {
 	int allow_discard;
 
 #ifdef USE_VK_PBR
+#ifdef USE_VBO_MDV
+	qboolean				vbo_mdv;
+#endif
 	int						vk_light_flags;
 	int						lightmap_stage;
 	uint32_t				vk_pbr_flags;
@@ -217,10 +220,54 @@ typedef struct {
 	} color;
 } Vk_Pipeline_Def;
 
+#ifdef USE_VK_PBR
 typedef struct VK_Pipeline {
 	Vk_Pipeline_Def def;
 	VkPipeline handle[ RENDER_PASS_COUNT ];
 } VK_Pipeline_t;
+
+typedef struct vktcMod_s {
+	vec4_t	matrix;
+	vec4_t	offTurb;
+} vktcMod_t;
+
+typedef struct vktcGen_s {
+	vec3_t	vector0;
+	int32_t	pad0;
+	vec3_t	vector1;
+	int32_t	type;
+} vktcGen_t;
+
+typedef struct vkBundle_s {
+	vec4_t		baseColor;
+	vec4_t		vertColor;
+	vktcMod_t	tcMod;
+	vktcGen_t	tcGen;
+	int32_t		rgbGen;
+	int32_t		alphaGen;
+	int32_t		numTexMods;	// make this to a specialization constant
+	int32_t		pad0;
+} vkBundle_t;
+
+typedef struct vkDisintegration_s {
+	vec3_t	origin;
+	float	threshold;
+} vkDisintegration_t;
+
+typedef struct vkDeform_s {
+	float	base;
+	float	amplitude;
+	float	phase;
+	float	frequency;
+
+	vec3_t	vector;
+	float	time;
+
+	int32_t	type;
+	int32_t	func;
+	vec2_t	pad0;
+} vkDeform_t;
+#endif
 
 // this structure must be in sync with shader uniforms!
 typedef struct vkUniform_s {
@@ -243,6 +290,7 @@ typedef struct vkUniform_s {
 	vec4_t fogColor;			// fragment
 } vkUniform_t;
 
+#ifdef USE_VK_PBR
 typedef struct vkUniformEntity_s {
 	vec4_t ambientLight;
 	vec4_t directedLight;
@@ -252,6 +300,11 @@ typedef struct vkUniformEntity_s {
 } vkUniformEntity_t;
 
 typedef struct vkUniformGlobal_s {
+	vkBundle_t			bundle[3];
+	vkDisintegration_t	disintegration;
+	vkDeform_t			deform;
+	float				portalRange;
+	vec3_t				pad0;
 	vec4_t				specularScale;	
 	vec4_t				normalScale;	
 } vkUniformGlobal_t;
@@ -260,6 +313,7 @@ typedef struct vkUniformCamera_s {
 	vec4_t viewOrigin;
 	//mat4_t modelMatrix;
 } vkUniformCamera_t;
+#endif
 
 #define TESS_XYZ   (1)
 #define TESS_RGBA0 (2)
@@ -397,6 +451,9 @@ void vk_update_mvp( const float *m );
 
 uint32_t vk_tess_index( uint32_t numIndexes, const void *src );
 void vk_bind_index_buffer( VkBuffer buffer, uint32_t offset );
+#ifdef USE_VK_PBR
+void vk_draw_indexed_indirect( uint32_t first_offset, uint32_t num_draws );
+#endif
 #ifdef USE_VBO
 void vk_draw_indexed( uint32_t indexCount, uint32_t firstIndex );
 #endif
@@ -441,12 +498,18 @@ typedef struct vk_tess_s {
 	byte *vertex_buffer_ptr; // pointer to mapped vertex buffer
 	VkDeviceSize vertex_buffer_offset;
 
+#ifdef USE_VK_PBR
+	VkBuffer			indirect_buffer;
+	byte				*indirect_buffer_ptr; // pointer to mapped indirect buffer
+	VkDeviceSize		indirect_buffer_offset;
+#endif
+
 	VkDescriptorSet uniform_descriptor;
 	uint32_t		uniform_read_offset;
 #ifdef USE_VK_PBR
 	uint32_t			camera_ubo_offset;
 	uint32_t			entity_ubo_offset[REFENTITYNUM_WORLD + 1];
-	//uint32_t			entity_ubo_offset[1024];
+
 	VkDeviceSize		buf_offset[9];
 	VkDeviceSize		vbo_offset[10];
 #else
@@ -467,6 +530,17 @@ typedef struct vk_tess_s {
 	VkPipeline			last_pipeline;
 
 	uint32_t num_indexes; // value from most recent vk_bind_index() call
+
+#if defined(USE_VK_PBR) && defined(USE_VBO)
+	struct {
+		int			numDraws;
+		uint32_t	offset;
+	} indirect;
+	struct {
+		uint32_t	num_indexes;
+		uint32_t	index_offset;
+	} indexed;
+#endif
 
 	VkRect2D scissor_rect;
 } vk_tess_t;
@@ -634,6 +708,13 @@ typedef struct {
 	VkDeviceSize geometry_buffer_size;
 	VkDeviceSize geometry_buffer_size_new;
 
+#ifdef USE_VK_PBR
+	// host visible memory that holds indirect drawdata
+	VkDeviceMemory		indirect_buffer_memory;
+	VkDeviceSize		indirect_buffer_size;
+	VkDeviceSize		indirect_buffer_size_new;
+#endif
+
 	// statistics
 	struct {
 		VkDeviceSize vertex_buffer_max;
@@ -647,9 +728,9 @@ typedef struct {
 	struct {
 		struct {
 #ifdef USE_VK_PBR
-			VkShaderModule gen[2][4][3][2][2][2]; // fastlight[0,1], tx[0,1,2], cl[0,1] env0[0,1] fog[0,1]
-			VkShaderModule ident1[2][4][2][2][2]; // fastlight[0,1], tx[0,1], env0[0,1] fog[0,1]
-			VkShaderModule fixed[2][4][2][2][2];  // fastlight[0,1], tx[0,1], env0[0,1] fog[0,1]
+			VkShaderModule gen[2][2][4][3][2][2][2]; // fastlight[0,1], tx[0,1,2], cl[0,1] env0[0,1] fog[0,1]
+			VkShaderModule ident1[2][2][4][2][2][2]; // fastlight[0,1], tx[0,1], env0[0,1] fog[0,1]
+			VkShaderModule fixed[2][2][4][2][2][2];  // fastlight[0,1], tx[0,1], env0[0,1] fog[0,1]
 #else
 			VkShaderModule gen[3][2][2][2]; // tx[0,1,2], cl[0,1] env0[0,1] fog[0,1]
 			VkShaderModule ident1[2][2][2]; // tx[0,1], env0[0,1] fog[0,1]

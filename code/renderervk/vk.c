@@ -6483,6 +6483,10 @@ static uint32_t vk_bind_stride( uint32_t in )
 
 static void push_bind( uint32_t binding, uint32_t stride )
 {
+#ifdef USE_VBO_MDV
+    if( ( is_mdv_vbo ) && ( binding == 1 || binding == 6 || binding == 7 ) )
+        return; // skip in_color bindings
+#endif
 	bindings[ num_binds ].binding = binding;
 	bindings[ num_binds ].stride = vk_bind_stride( stride );
 	bindings[ num_binds ].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
@@ -6491,6 +6495,10 @@ static void push_bind( uint32_t binding, uint32_t stride )
 
 static void push_attr( uint32_t location, uint32_t binding, VkFormat format )
 {
+#ifdef USE_VBO_MDV
+    if( ( is_mdv_vbo ) && ( binding == 1 || binding == 6 || binding == 7 ) )
+        return; // skip in_color bindings
+#endif
 	attribs[ num_attrs ].location = location;
 	attribs[ num_attrs ].binding = binding;
 	attribs[ num_attrs ].format = format;
@@ -7432,33 +7440,30 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	}
 
  #ifdef USE_VK_PBR  
-    if ( def->vk_light_flags ) 
+    if ( def->vk_light_flags && !vk.useFastLight ) 
 	{
-		if ( !has_normal )
-		{
-			if ( (def->vk_light_flags && !vk.useFastLight) || def->vbo_mdv ) 
-			{
-				push_bind( 5, sizeof( vec4_t ) );					// normals
-				push_attr( 5, 5, VK_FORMAT_R32G32B32A32_SFLOAT );
-			}
-			else if ( (def->vk_light_flags & LIGHTDEF_USE_LIGHT_VECTOR) && vk.useFastLight ) 
-			{
-				push_bind( 5, sizeof( vec4_t ) );					// normals
-				push_attr( 5, 5, VK_FORMAT_R32G32B32A32_SFLOAT );
-			}
-		}
+		push_bind( 8, sizeof( vec4_t ) );						// tangent
+		push_attr( 8, 8, VK_FORMAT_R32G32B32A32_SFLOAT );
 
-		if ( !vk.useFastLight )
-		{
-			push_bind( 8, sizeof( vec4_t ) );						// tangent
-			push_attr( 8, 8, VK_FORMAT_R32G32B32A32_SFLOAT );
-
-			if ( !(def->vk_light_flags & LIGHTDEF_USE_LIGHT_VECTOR) ){
-				push_bind( 9, sizeof(vec4_t) );							// lightdir
-				push_attr( 9, 9, VK_FORMAT_R32G32B32A32_SFLOAT );
-			}
+		if ( !(def->vk_light_flags & LIGHTDEF_USE_LIGHT_VECTOR) ){
+			push_bind( 9, sizeof(vec4_t) );							// lightdir
+			push_attr( 9, 9, VK_FORMAT_R32G32B32A32_SFLOAT );
 		}
-    }
+	}
+
+	if ( !has_normal )
+	{
+		if ( (def->vk_light_flags && !vk.useFastLight) || def->vbo_mdv ) 
+		{
+			push_bind( 5, sizeof( vec4_t ) );					// normals
+			push_attr( 5, 5, VK_FORMAT_R32G32B32A32_SFLOAT );
+		}
+		else if ( (def->vk_light_flags & LIGHTDEF_USE_LIGHT_VECTOR) && vk.useFastLight ) 
+		{
+			push_bind( 5, sizeof( vec4_t ) );					// normals
+			push_attr( 5, 5, VK_FORMAT_R32G32B32A32_SFLOAT );
+		}
+	}
 #endif
 
 	vertex_input_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -8447,8 +8452,7 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 				return;
 			}
 
-			//vk_bind_index_buffer( tess.ibo_model->buffer, vk.cmd->indexed.index_offset );
-			vk_bind_index_buffer( tess.ibo_model->buffer, 0 );
+			vk_bind_index_buffer( tess.ibo_model->buffer, vk.cmd->indexed.index_offset );
 			qvkCmdDrawIndexed( vk.cmd->command_buffer, vk.cmd->indexed.num_indexes, 1, 0, 0, 0 );
 			return;
 		}

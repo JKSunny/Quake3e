@@ -2131,6 +2131,10 @@ void	RB_CalcModulateAlphasByFog( unsigned char *dstColors );
 void	RB_CalcModulateRGBAsByFog( unsigned char *dstColors );
 void	RB_CalcWaveAlpha( const waveForm_t *wf, unsigned char *dstColors );
 void	RB_CalcWaveColor( const waveForm_t *wf, unsigned char *dstColors );
+#ifdef USE_VK_PBR
+float	RB_CalcWaveAlphaSingle( const waveForm_t *wf );
+float	RB_CalcWaveColorSingle( const waveForm_t *wf );
+#endif
 void	RB_CalcAlphaFromEntity( unsigned char *dstColors );
 void	RB_CalcAlphaFromOneMinusEntity( unsigned char *dstColors );
 void	RB_CalcStretchTexCoords( const waveForm_t *wf, float *srcTexCoords, float *dstTexCoords );
@@ -2139,6 +2143,14 @@ void	RB_CalcColorFromOneMinusEntity( unsigned char *dstColors );
 void	RB_CalcSpecularAlpha( unsigned char *alphas );
 void	RB_CalcDiffuseColor( unsigned char *colors );
 
+#ifdef USE_VK_PBR
+void	RB_CalcScaleTexMatrix( const float scale[2], float *matrix );
+void	RB_CalcScrollTexMatrix( const float scrollSpeed[2], float *matrix );
+void	RB_CalcRotateTexMatrix( float degsPerSecond, float *matrix );
+void	RB_CalcTurbulentFactors( const waveForm_t *wf, float *amplitude, float *now );
+void	RB_CalcTransformTexMatrix( const texModInfo_t *tmi, float *matrix  );
+void	RB_CalcStretchTexMatrix( const waveForm_t *wf, float *matrix );
+#endif
 /*
 =============================================================
 
