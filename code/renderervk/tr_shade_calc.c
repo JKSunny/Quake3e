@@ -727,39 +727,6 @@ void RB_CalcWaveAlpha( const waveForm_t *wf, unsigned char *dstColors )
 	}
 }
 
-#ifdef USE_VK_PBR
-/*
-** RB_CalcWaveColorSingle
-*/
-float RB_CalcWaveColorSingle( const waveForm_t *wf )
-{
-	float glow;
-
-	if ( wf->func == GF_NOISE ) {
-		glow = wf->base + R_NoiseGet4f( 0, 0, 0, ( tess.shaderTime + wf->phase ) * wf->frequency ) * wf->amplitude;
-	} else {
-		glow = EvalWaveForm( wf ) * tr.identityLight;
-	}
-
-	if ( glow < 0 ) {
-		glow = 0;
-	}
-	else if ( glow > 1 ) {
-		glow = 1;
-	}
-
-	return glow;
-}
-
-/*
-** RB_CalcWaveAlphaSingle
-*/
-float RB_CalcWaveAlphaSingle( const waveForm_t *wf )
-{
-	return EvalWaveFormClamped( wf );
-}
-#endif
-
 /*
 ** RB_CalcModulateColorsByFog
 */
@@ -1318,6 +1285,37 @@ void RB_CalcDiffuseColor( unsigned char *colors )
 }
 
 #ifdef USE_VK_PBR
+/*
+** RB_CalcWaveColorSingle
+*/
+float RB_CalcWaveColorSingle( const waveForm_t *wf )
+{
+	float glow;
+
+	if ( wf->func == GF_NOISE ) {
+		glow = wf->base + R_NoiseGet4f( 0, 0, 0, ( tess.shaderTime + wf->phase ) * wf->frequency ) * wf->amplitude;
+	} else {
+		glow = EvalWaveForm( wf ) * tr.identityLight;
+	}
+
+	if ( glow < 0 ) {
+		glow = 0;
+	}
+	else if ( glow > 1 ) {
+		glow = 1;
+	}
+
+	return glow;
+}
+
+/*
+** RB_CalcWaveAlphaSingle
+*/
+float RB_CalcWaveAlphaSingle( const waveForm_t *wf )
+{
+	return EvalWaveFormClamped( wf );
+}
+
 /*
 ** RB_CalcStretchTexMatrix
 */

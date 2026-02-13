@@ -934,6 +934,7 @@ void R_ComputeTexCoords( const int b, const textureBundle_t *bundle ) {
 	tess.svars.texcoordPtr[ b ] = src;
 }
 
+#ifdef USE_VK_PBR
 static qboolean vk_is_valid_pbr_surface( const qboolean hasPBR ) {
 	if( !vk.pbrActive || !hasPBR )
 		return qfalse;
@@ -947,6 +948,41 @@ static qboolean vk_is_valid_pbr_surface( const qboolean hasPBR ) {
 	//if ( backEnd.currentEntity ) {
 	//	if ( backEnd.currentEntity != &tr.worldEntity )
 	//		return qfalse;
+	//}
+
+	return qtrue;
+}
+
+static qboolean ShaderRequiresCPUDeforms( const shader_t *shader ) {
+
+	// only do this for ghoul2
+	//if ( tess.vbo_model && tess.surfType == SF_IQM  ){
+
+		if ( shader->numDeforms > 1 )
+			return qtrue;
+
+		deformStage_t *ds;
+
+		if ( shader->numDeforms == 1 ) {
+			// only support the first one
+			deformStage_t *ds = &tess.shader->deforms[ 0 ];
+
+			switch ( ds->deformation ) {
+				case DEFORM_NONE:
+				case DEFORM_NORMALS:
+				case DEFORM_WAVE:
+				case DEFORM_BULGE:
+				case DEFORM_MOVE:
+				case DEFORM_PROJECTION_SHADOW:
+					return qfalse;
+				default:
+					return qtrue;
+			}
+		}
+
+		assert( shader->numDeforms == 0 );
+
+		return qfalse;
 	//}
 
 	return qtrue;
@@ -1211,41 +1247,6 @@ static void vk_compute_colors( const int b, const shaderStage_t *pStage, int for
 		uniform_global.portalRange = tess.shader->portalRange;
 }
 
-static qboolean ShaderRequiresCPUDeforms( const shader_t *shader ) {
-
-	// only do this for ghoul2
-	//if ( tess.vbo_model && tess.surfType == SF_IQM  ){
-
-		if ( shader->numDeforms > 1 )
-			return qtrue;
-
-		deformStage_t *ds;
-
-		if ( shader->numDeforms == 1 ) {
-			// only support the first one
-			deformStage_t *ds = &tess.shader->deforms[ 0 ];
-
-			switch ( ds->deformation ) {
-				case DEFORM_NONE:
-				case DEFORM_NORMALS:
-				case DEFORM_WAVE:
-				case DEFORM_BULGE:
-				case DEFORM_MOVE:
-				case DEFORM_PROJECTION_SHADOW:
-					return qfalse;
-				default:
-					return qtrue;
-			}
-		}
-
-		assert( shader->numDeforms == 0 );
-
-		return qfalse;
-	//}
-
-	return qtrue;
-}
-
 static void vk_compute_deform( void ) {
 	int		type = DEFORM_NONE;
 	int		waveFunc = GF_NONE;
@@ -1345,6 +1346,7 @@ static void vk_compute_deform( void ) {
 		info->func = waveFunc;	
 	}
 }
+#endif
 
 /*
 ** RB_IterateStagesGeneric
@@ -1360,19 +1362,20 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 	int stage, i;
 
 #ifdef USE_VULKAN
-#ifdef USE_VK_PBR
-	qboolean is_pbr_surface;
-	qboolean is_mdv_vbo;
-#endif
 	uint32_t pipeline;
 	int fog_stage;
 	qboolean pushUniform;
 
 #ifdef USE_VK_PBR
+	qboolean is_pbr_surface;
+	qboolean is_mdv_vbo;
+
 	is_mdv_vbo = qfalse;
 
 	if ( tess.vbo_model ) {
+#ifdef USE_VBO_MDV
 		is_mdv_vbo = (qboolean)( tess.surfType == SF_VBO_MDVMESH );
+#endif
 	}
 #endif
 
@@ -1438,14 +1441,17 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 					uniform.ent.color[i][3] = pStage->bundle[i].alphaGen == AGEN_IDENTITY ? 1.0 : (backEnd.currentEntity->e.shader.rgba[3] / 255.0);
 					pushUniform = qtrue;
 				}
+#ifdef USE_VK_PBR
 				if ( tess.vbo_model ) {
 					vk_compute_colors( i, pStage, 0 );
 
 					vk_compute_tex_coords( &pStage->bundle[i], &uniform_global.bundle[i].tcMod, &uniform_global.bundle[i].tcGen );
 					uniform_global.bundle[i].numTexMods = pStage->bundle[i].numTexMods;
 
+					pushUniform = qtrue;
 					continue;
 				}
+#endif
 
 				if ( tess_flags & ( TESS_ST0 << i ) ) {
 					R_ComputeTexCoords( i, &pStage->bundle[i] );
@@ -1553,11 +1559,6 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			def.vk_pbr_flags = 0;
 			pipeline = vk_find_pipeline_ext( 0, &def, qfalse );
 		}
-
-		if ( def.vbo_mdv )
-		{
-			pushUniform = qtrue;
-		}
 #endif
 
 		vk_bind_pipeline( pipeline );
@@ -1566,6 +1567,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 #ifdef USE_VK_PBR
 		if ( tess.vbo_model )
 		{
+#ifdef USE_VBO_MDV_INDIRECT
 			if ( tess.multiDrawPrimitives ) 
 			{
 				// draw indexed indirect
@@ -1598,8 +1600,16 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 					vk.cmd->indexed.index_offset = (glIndex_t)(size_t)(tess.multiDrawFirstIndex[0]) * sizeof(uint32_t);
 				}
 			}
+#else
+#ifdef USE_VBO_MDV
+			if ( is_mdv_vbo )
+			{
+				vk.cmd->indexed.num_indexes = tess.vbo_mdv_surf[MDV_CURRENT_FRAME].num_indexes;
+				vk.cmd->indexed.index_offset = (glIndex_t)(size_t)(tess.vbo_mdv_surf[MDV_CURRENT_FRAME].index_offset) * sizeof(uint32_t);
+			}
+#endif
+#endif
 		}
-
 		if ( pushUniform ) {
 			pushUniform = qfalse;
 			vk_push_uniform( &uniform );
@@ -1753,6 +1763,7 @@ uint32_t vk_push_uniform( const vkUniform_t *uniform ) {
 	return offset;
 }
 
+#ifdef USE_VK_PBR
 uint32_t vk_push_uniform_global( const vkUniformGlobal_t *uniform ) {	
 	const uint32_t offset = PAD(vk.cmd->vertex_buffer_offset, (VkDeviceSize)vk.uniform_alignment);
 
@@ -1783,6 +1794,7 @@ uint32_t vk_push_indirect( int count, const void *data ) {
 
 	return offset;
 }
+#endif
 
 #ifdef USE_PMLIGHT
 void VK_LightingPass( void )

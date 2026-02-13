@@ -204,9 +204,8 @@ typedef struct {
 	int allow_discard;
 
 #ifdef USE_VK_PBR
-#ifdef USE_VBO_MDV
 	qboolean				vbo_mdv;
-#endif
+
 	int						vk_light_flags;
 	int						lightmap_stage;
 	uint32_t				vk_pbr_flags;
@@ -870,8 +869,9 @@ typedef struct {
 	qboolean blitEnabled;
 	qboolean msaaActive;
 #ifdef USE_VK_PBR
+#ifdef USE_VBO_MDV
 	qboolean vboMdvActive;
-
+#endif
 	qboolean normalMappingActive;
 	qboolean specularMappingActive;
 	qboolean useFastLight;

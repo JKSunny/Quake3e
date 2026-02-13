@@ -547,7 +547,7 @@ void R_BuildMD3( model_t *mod, mdvModel_t *mdvModel )
 	mdvSurface_t   *surf;
 	srfVBOMDVMesh_t *vboSurf;
 
-	uint32_t		i, j, k;
+	uint32_t		i, j, k, f;
 
 	mdvModel->numVBOSurfaces = mdvModel->numSurfaces;
 	mdvModel->vboSurfaces = (srfVBOMDVMesh_t *)ri.Hunk_Alloc(sizeof(*mdvModel->vboSurfaces) * mdvModel->numSurfaces, h_low);
@@ -571,13 +571,15 @@ void R_BuildMD3( model_t *mod, mdvModel_t *mdvModel )
 	int *baseVertexes = (int *)ri.Hunk_AllocateTempMemory(sizeof(int) * (mdvModel->numSurfaces + 1));
 	int *indexOffsets = (int *)ri.Hunk_AllocateTempMemory(sizeof(int) * mdvModel->numSurfaces);
 
+	int numFrames = MAX(1, mdvModel->numFrames);
+
 	// Calculate the required size of the vertex buffer.
 	for (int n = 0; n < mdvModel->numSurfaces; n++, surf++)
 	{
 		baseVertexes[n] = numVerts;
 		indexOffsets[n] = numIndexes;
 
-		numVerts += surf->numVerts;
+		numVerts += surf->numVerts * numFrames;
 		numIndexes += surf->numIndexes;
 	}
 	baseVertexes[mdvModel->numSurfaces] = numVerts;
@@ -611,18 +613,8 @@ void R_BuildMD3( model_t *mod, mdvModel_t *mdvModel )
 	glIndex_t *index = indices;
 
 	surf = mdvModel->surfaces;
-	for (i = 0; i < mdvModel->numSurfaces; i++, surf++)
+	for ( i = 0; i < mdvModel->numSurfaces; i++, surf++ )
 	{
-		vec4_t *tangentsf = (vec4_t *)ri.Hunk_AllocateTempMemory(sizeof(vec4_t) * surf->numVerts);
-
-		vk_mikkt_mdv_generate(
-			surf->numIndexes / 3,
-			surf->verts,
-			tangentsf,
-			surf->st,
-			surf->indexes
-		);
-
 		for ( k = 0; k < surf->numIndexes; k++)
 		{
 			*index = surf->indexes[k] + baseVertexes[i];
@@ -631,28 +623,32 @@ void R_BuildMD3( model_t *mod, mdvModel_t *mdvModel )
 		}
 
 		v = surf->verts;
-		for ( j = 0; j < surf->numVerts; j++, v++ )
+		for ( j = 0; j < surf->numVerts * numFrames; j++, v++ )
 		{
 			VectorCopy(v->xyz, *attr.verts);
 			VectorCopy(v->normal, *attr.normals);
-			Vector4Copy( (float*)(tangentsf + j), *attr.tangents );
-
-			//*normals = R_VboPackNormal(v->normal);
-			//*tangents = tangentsf[j];
+			Vector4Copy(v->tangent, *attr.tangents);
 
 			attr.verts = (vec4_t *)((byte *)attr.verts + stride);
 			attr.normals = (vec4_t *)((byte *)attr.normals + stride);
 			attr.tangents = (vec4_t *)((byte *)attr.tangents + stride);
 		}
-		ri.Hunk_FreeTempMemory(tangentsf);
 
-		st = surf->st;
-		for ( j = 0; j < surf->numVerts; j++, st++ ) 
+		// sadly, copy st data to all frames.
+		// when split into two VBOs (static/frames) an additional index buffer is also required
+		// or.. change the layout to match rend2
+		// for now, this will do, we are not talking millions of vertices here
+		// worst case: 4096 * 1024 * 8 bytes = 32MB
+		for ( f = 0; f < numFrames; f++ )
 		{
-			(*attr.texcoords)[0] = st->st[0];
-			(*attr.texcoords)[1] = st->st[1];
+			st = surf->st;
+			for ( j = 0; j < surf->numVerts; j++, st++ ) 
+			{
+				(*attr.texcoords)[0] = st->st[0];
+				(*attr.texcoords)[1] = st->st[1];
 
-			attr.texcoords = (vec2_t *)((byte *)attr.texcoords + stride);
+				attr.texcoords = (vec2_t *)((byte *)attr.texcoords + stride);
+			}
 		}
 	}
 
@@ -683,6 +679,9 @@ void R_BuildMD3( model_t *mod, mdvModel_t *mdvModel )
 		vboSurf->maxIndex = baseVertexes[i + 1] - 1;
 		vboSurf->numVerts = surf->numVerts;
 		vboSurf->numIndexes = surf->numIndexes;
+
+
+		vboSurf->frameSize = stride * surf->numVerts;
 	}
 
 	ri.Hunk_FreeTempMemory(indexOffsets);

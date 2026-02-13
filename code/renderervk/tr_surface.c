@@ -1480,10 +1480,17 @@ void RB_SurfaceVBOMDVMesh( srfVBOMDVMesh_t *surf )
 	if ( !surf->vbo || !surf->ibo )
 		return;
 
+	RB_EndSurface();
+	RB_BeginSurface( tess.shader, tess.fogNum, 0 );
+
 	tess.surfType = surf->surfaceType;
 	tess.vbo_model = surf->vbo;
 	tess.ibo_model = surf->ibo;
 
+	const refEntity_t    *refEnt;
+	refEnt = &backEnd.currentEntity->e;
+
+#ifdef USE_VBO_MDV_INDIRECT
 	int i, mergeForward, mergeBack;
 	GLvoid *firstIndexOffset, *lastIndexOffset;
 
@@ -1561,9 +1568,29 @@ void RB_SurfaceVBOMDVMesh( srfVBOMDVMesh_t *surf )
 		tess.multiDrawMaxIndex[tess.multiDrawPrimitives] = surf->maxIndex;
 		tess.multiDrawPrimitives++;
 	}
+#else
+	GLvoid *indexOffset;
+	indexOffset = BUFFER_OFFSET( surf->indexOffset );
+
+	tess.vbo_mdv_surf[MDV_CURRENT_FRAME].num_indexes = surf->numIndexes;
+	tess.vbo_mdv_surf[MDV_CURRENT_FRAME].index_offset = (glIndex_t *)indexOffset;
+#endif
+
+	if (surf->mdvModel->numFrames > 1 ) {
+		tess.vbo_mdv_surf[MDV_CURRENT_FRAME].frame_offset = refEnt->frame * surf->frameSize;
+		tess.vbo_mdv_surf[MDV_PREVIOUS_FRAME].frame_offset = refEnt->oldframe * surf->frameSize;
+		tess.vbo_mdv_anim = qtrue;
+	}
+	else {
+		tess.vbo_mdv_surf[MDV_CURRENT_FRAME].frame_offset = 0;
+		tess.vbo_mdv_surf[MDV_PREVIOUS_FRAME].frame_offset = 0;
+		tess.vbo_mdv_anim = qfalse;
+	}
 
 	tess.numIndexes = surf->numIndexes;
 	tess.numVertexes = surf->numVerts;
+
+	RB_EndSurface();
 }
 #endif
 

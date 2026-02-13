@@ -6474,9 +6474,10 @@ static qboolean is_mdv_vbo;
 
 static uint32_t vk_bind_stride( uint32_t in ) 
 {
+#ifdef USE_VBO_MDV
     if ( is_mdv_vbo )
         return get_mdv_stride();
-
+#endif
     return in;
 }
 #endif
@@ -6571,8 +6572,9 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	//const int use_pbr = def->vk_pbr_flags ? 1 : 0;
 
     int vbo = 0;
+#ifdef USE_VBO_MDV
     if ( def->vbo_mdv )     vbo = 1;
-
+#endif
 	switch ( def->shader_type ) {
 
 		case TYPE_SIGNLE_TEXTURE_LIGHTING:
@@ -7179,9 +7181,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, renderPass_t renderPassI
 	num_binds = num_attrs = 0;
 	qboolean has_normal = qfalse;
 
-#ifdef USE_VBO_MDV
 	is_mdv_vbo = def->vbo_mdv;
-#endif
 
 	switch ( def->shader_type ) {
 
@@ -8135,9 +8135,12 @@ static void vk_vbo_bind_geometry_mdv( int32_t flags )
 	
 	Com_Memset( vk.cmd->vbo_offset, 0, sizeof(vk.cmd->vbo_offset) );
 
-	vk.cmd->vbo_offset[0] = vbo->offsets[0];	// xyz
-	vk.cmd->vbo_offset[2] = vbo->offsets[2];	// texture coords
-	vk.cmd->vbo_offset[5] = vbo->offsets[5];	// normals
+	const uint32_t cur_frame_offset = tess.vbo_mdv_surf[MDV_CURRENT_FRAME].frame_offset;
+	//const uint32_t prev_frame_offset = tess.vbo_mdv_surf[MDV_PREVIOUS_FRAME].frame_offset;
+
+	vk.cmd->vbo_offset[0] = vbo->offsets[0] + cur_frame_offset;	// xyz
+	vk.cmd->vbo_offset[2] = vbo->offsets[2];					// texture coords
+	vk.cmd->vbo_offset[5] = vbo->offsets[5] + cur_frame_offset;	// normals
 
 	if (flags & TESS_ST1)
 		vk.cmd->vbo_offset[3] = vbo->offsets[2];
@@ -8146,7 +8149,7 @@ static void vk_vbo_bind_geometry_mdv( int32_t flags )
 		vk.cmd->vbo_offset[4] = vbo->offsets[2];
 
 	if (flags & TESS_TANGENT)
-		vk.cmd->vbo_offset[8] = vbo->offsets[8];
+		vk.cmd->vbo_offset[8] = vbo->offsets[8] + cur_frame_offset;
 
 	bind_base = 0;
 	bind_count = 10;
@@ -8433,12 +8436,12 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 #if defined(USE_VK_PBR)
 	if ( tess.vbo_model )
 	{
+#ifdef USE_VBO_MDV_INDIRECT
 		if ( tess.multiDrawPrimitives ) 
 		{
 			// draw indexed indirect
 			if ( tess.multiDrawPrimitives > 1 ) 
 			{
-#if 0
 				vk_bind_index_buffer( tess.ibo_model->buffer, 0 );
 
 				qvkCmdDrawIndexedIndirect( 
@@ -8448,7 +8451,6 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 					vk.cmd->indirect.numDraws,
 					sizeof(VkDrawIndexedIndirectCommand)
 					);
-#endif
 				return;
 			}
 
@@ -8456,6 +8458,11 @@ void vk_draw_geometry( Vk_Depth_Range depth_range, qboolean indexed ) {
 			qvkCmdDrawIndexed( vk.cmd->command_buffer, vk.cmd->indexed.num_indexes, 1, 0, 0, 0 );
 			return;
 		}
+#else
+		vk_bind_index_buffer( tess.ibo_model->buffer, vk.cmd->indexed.index_offset );
+		qvkCmdDrawIndexed( vk.cmd->command_buffer, vk.cmd->indexed.num_indexes, 1, 0, 0, 0 );
+		return;
+#endif
 	} 
 	
 	else

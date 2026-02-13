@@ -45,7 +45,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #ifdef USE_VBO
 	#define MAX_VBOS      4096
 
-	#define USE_VBO_MDV
+	//#define USE_VBO_MDV
+	//#define USE_VBO_MDV_INDIRECT	// does not work with vertex anims yet
 #endif
 
 #define USE_FOG_ONLY
@@ -1143,6 +1144,12 @@ typedef struct mdvSurface_s
 } mdvSurface_t;
 
 #ifdef USE_VBO_MDV
+typedef enum {
+	MDV_CURRENT_FRAME,
+	MDV_PREVIOUS_FRAME,
+	MDV_FRAME_LERP,
+} modtype_t;
+
 typedef struct srfVBOMDVMesh_s
 {
 	surfaceType_t   surfaceType;
@@ -1156,6 +1163,8 @@ typedef struct srfVBOMDVMesh_s
 	int             numVerts;
 	glIndex_t       minIndex;
 	glIndex_t       maxIndex;
+
+	uint32_t		frameSize;
 
 	// static render data
 	VBO_t          *vbo;
@@ -1885,10 +1894,22 @@ typedef struct shaderCommands_s
 	int			vboIndex;
 	int			vboStage;
 	qboolean	allowVBO;
-#ifdef USE_VK_PBR
+#if defined(USE_VK_PBR) && defined(USE_VBO)
 	VBO_t		*vbo_model; // ghoul2/mdv item index
 	IBO_t		*ibo_model; // ghoul2/mdv item index
+
+#ifdef USE_VBO_MDV
+	struct {
+		#ifndef USE_VBO_MDV_INDIRECT
+		GLsizei		num_indexes;
+		glIndex_t	index_offset;
+		#endif
+		uint32_t	frame_offset;
+	} vbo_mdv_surf[MDV_FRAME_LERP];
+	qboolean vbo_mdv_anim;
 #endif
+#endif
+
 #endif
 
 	shader_t	*shader;
@@ -2131,10 +2152,6 @@ void	RB_CalcModulateAlphasByFog( unsigned char *dstColors );
 void	RB_CalcModulateRGBAsByFog( unsigned char *dstColors );
 void	RB_CalcWaveAlpha( const waveForm_t *wf, unsigned char *dstColors );
 void	RB_CalcWaveColor( const waveForm_t *wf, unsigned char *dstColors );
-#ifdef USE_VK_PBR
-float	RB_CalcWaveAlphaSingle( const waveForm_t *wf );
-float	RB_CalcWaveColorSingle( const waveForm_t *wf );
-#endif
 void	RB_CalcAlphaFromEntity( unsigned char *dstColors );
 void	RB_CalcAlphaFromOneMinusEntity( unsigned char *dstColors );
 void	RB_CalcStretchTexCoords( const waveForm_t *wf, float *srcTexCoords, float *dstTexCoords );
@@ -2144,6 +2161,8 @@ void	RB_CalcSpecularAlpha( unsigned char *alphas );
 void	RB_CalcDiffuseColor( unsigned char *colors );
 
 #ifdef USE_VK_PBR
+float	RB_CalcWaveAlphaSingle( const waveForm_t *wf );
+float	RB_CalcWaveColorSingle( const waveForm_t *wf );
 void	RB_CalcScaleTexMatrix( const float scale[2], float *matrix );
 void	RB_CalcScrollTexMatrix( const float scrollSpeed[2], float *matrix );
 void	RB_CalcRotateTexMatrix( float degsPerSecond, float *matrix );
@@ -2345,12 +2364,14 @@ extern void VBO_ClearQueue( void );
 extern void VBO_Flush( void );
 
 #ifdef USE_VK_PBR
-int			get_mdv_stride( void );
 void		vk_release_model_vbo_all( void );
 
-
-IBO_t *R_CreateIBO( const char *name, const byte *vbo_data, int vbo_size );
-VBO_t *R_CreateVBO( const char *name, const byte *vbo_data, int vbo_size );
+IBO_t		*R_CreateIBO( const char *name, const byte *vbo_data, int vbo_size );
+VBO_t		*R_CreateVBO( const char *name, const byte *vbo_data, int vbo_size );
+#ifdef USE_VBO_MDV
+int			get_mdv_stride( void );
+void		R_BuildMD3( model_t *mod, mdvModel_t *mdvModel );
+#endif
 #endif
 
 #endif
