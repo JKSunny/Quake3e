@@ -24,6 +24,9 @@ pre-compiles .vert, .frag, .geom and .tmpl.
 #define MAX_TASKS 1500
 #define MAX_THREADS 16 
 
+// use -Os flag to reduce size
+//#define RELEASE
+
 #define ARRAY_LEN( x ) ( sizeof( x ) / sizeof( *(x) ) )
 
 typedef struct {
@@ -97,9 +100,16 @@ static std::string create_compiler_cmd( ShaderTask* task, bool silent = true)
 
     const char *silent_flag = silent ? "-s " : "";
 
-    snprintf(cmd, sizeof(cmd), "\"%s\" %s -S %s -V -o %s %s %s",
+#ifdef RELEASE
+    const char *optimize_flag = "-Os";
+#else
+    const char *optimize_flag = "";
+#endif
+
+    snprintf(cmd, sizeof(cmd), "\"%s\" %s %s -S %s -V -o %s %s %s",
         compiler.base_path.c_str(),
         silent_flag,
+        optimize_flag,
         task->stage,
         task->spirv_out,
         task->input_file,

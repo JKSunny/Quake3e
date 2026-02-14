@@ -304,7 +304,6 @@ typedef struct vkUniformGlobal_s {
 
 typedef struct vkUniformCamera_s {
 	vec4_t viewOrigin;
-	//mat4_t modelMatrix;
 } vkUniformCamera_t;
 #endif
 

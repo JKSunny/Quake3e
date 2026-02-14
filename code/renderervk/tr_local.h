@@ -45,7 +45,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #ifdef USE_VBO
 	#define MAX_VBOS      4096
 
-	//#define USE_VBO_MDV
+	#define USE_VBO_MDV
 	//#define USE_VBO_MDV_INDIRECT	// does not work with vertex anims yet
 #endif
 
