@@ -1089,13 +1089,13 @@ static void vk_compute_tex_coords( const textureBundle_t *bundle, vktcMod_t *tcM
 	}
 }
 
-static void vk_compute_colors( const int b, const shaderStage_t *pStage, int forceRGBGen ){	
+static void vk_compute_colors( const int b, const shaderStage_t *pStage ){	
 	//if ( backEnd.currentEntity->e.renderfx & RF_VOLUMETRIC ) 
 	//	return;
 
 	float *baseColor, *vertColor;
 
-	int rgbGen = forceRGBGen;
+	int rgbGen = pStage->bundle[b].rgbGen;
 	int alphaGen = pStage->bundle[b].alphaGen;
 
 	baseColor = (float*)uniform_global.bundle[b].baseColor;
@@ -1103,9 +1103,6 @@ static void vk_compute_colors( const int b, const shaderStage_t *pStage, int for
 
 	baseColor[0] = baseColor[1] = baseColor[2] = baseColor[3] = 1.0f;  	
    	vertColor[0] = vertColor[1] = vertColor[2] = vertColor[3] = 0.0f;
-
-	if ( !forceRGBGen )
-		rgbGen = pStage->bundle[b].rgbGen;
 
 	switch ( rgbGen) {
 		case CGEN_IDENTITY_LIGHTING: 
@@ -1443,7 +1440,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 				}
 #ifdef USE_VK_PBR
 				if ( tess.vbo_model ) {
-					vk_compute_colors( i, pStage, 0 );
+					vk_compute_colors( i, pStage );
 
 					vk_compute_tex_coords( &pStage->bundle[i], &uniform_global.bundle[i].tcMod, &uniform_global.bundle[i].tcGen );
 					uniform_global.bundle[i].numTexMods = pStage->bundle[i].numTexMods;

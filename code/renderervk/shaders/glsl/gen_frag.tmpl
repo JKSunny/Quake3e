@@ -786,7 +786,7 @@ void main() {
 			attenuation = 1.0;
 		#elif defined(USE_LIGHT_VECTOR)
 			lightColor = u_directedLight.rgb;
-			ambientColor = u_ambientLight.rgb;
+			ambientColor = u_ambientLight.rgb * base.rgb;
 			diffuse = base;
 			attenuation = 1.0;
 		#elif defined(USE_LIGHT_VERTEX)
