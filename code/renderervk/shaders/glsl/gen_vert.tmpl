@@ -72,11 +72,6 @@ layout(set = 0, binding = 0) uniform UBO {
 		int		numTexMods;
 	};
 
-	struct vkDisintegration_t {
-		vec3	origin;
-		float	threshold;
-	};
-
 	struct vkDeform_t {
 		float	base;
 		float	amplitude;
@@ -92,12 +87,10 @@ layout(set = 0, binding = 0) uniform UBO {
 
 	layout(set = 0, binding = 1) uniform Camera {
 		vec4 u_ViewOrigin;
-		//mat4 u_ModelMatrix;
 	};
 
 	layout(set = 0, binding = 3) uniform Global {
 		vkBundle_t			u_bundle[3];
-		vkDisintegration_t	u_disintegration;
 		vkDeform_t			u_deform;
 		float				u_portalRange;
 		vec4				u_SpecularScale;	
@@ -193,34 +186,8 @@ out gl_PerVertex {
 vec4 CalcColor( int index, in vec3 position, in vec3 normal ) {
 	vec4 color = ( u_bundle[index].vertColor * vec4( 0.0 ) ) + u_bundle[index].baseColor;		// skip vertColor?
 
-	switch ( u_bundle[index].rgbGen ) {
-		case 14:// CGEN_DISINTEGRATION_1
-		{
-			vec3 delta = u_disintegration.origin - position;
-			float sqrDistance = dot( delta, delta );
-
-			if ( sqrDistance < u_disintegration.threshold )
-				color *= 0.0;
-			else if ( sqrDistance < u_disintegration.threshold + 60.0 )
-				color *= vec4( 0.0, 0.0, 0.0, 1.0 );
-			else if ( sqrDistance < u_disintegration.threshold + 150.0 )
-				color *= vec4( 0.435295, 0.435295, 0.435295, 1.0 );
-			else if ( sqrDistance < u_disintegration.threshold + 180.0 )
-				color *= vec4( 0.6862745, 0.6862745, 0.6862745, 1.0 );
-
-			return color;
-		}
-		case 15:// CGEN_DISINTEGRATION_2
-		{
-			vec3 delta = u_disintegration.origin - position;
-			float sqrDistance = dot( delta, delta );
-
-			if ( sqrDistance < u_disintegration.threshold )
-				return vec4(0.0);
-
-			return color;
-		}
-	}
+	//switch ( u_bundle[index].rgbGen ) {
+	//}
 
 	switch ( u_bundle[index].alphaGen ) {
 		case 6: // AGEN_LIGHTING_SPECULAR
@@ -342,22 +309,6 @@ vec3 DeformPosition( const vec3 pos, const vec3 normal, const vec2 st )
 			vec3 lightPos = lightDir * d;
 			return pos - lightPos * (dot( pos, ground ) + groundDist);
 		}
-
-		case 17: // DEFORM_DISINTEGRATION
-		{
-			vec3 delta = u_disintegration.origin - pos;
-			float sqrDistance = dot(delta, delta);
-			vec3 normalScale = vec3(-0.01);
-			if ( sqrDistance < u_disintegration.threshold )
-			{
-				normalScale = vec3(2.0, 2.0, 0.5);
-			}
-			else if ( sqrDistance < u_disintegration.threshold + 50 )
-			{
-				normalScale = vec3(1.0, 1.0, 0.0);
-			}
-			return pos + normal * normalScale;
-		}
 	}
 }
 
@@ -398,7 +349,7 @@ vec2 GenTexCoords(const in vec2 tc, int TCGen, vec3 position, vec3 normal, vec3 
 {
 	vec2 tex = tc;
 
-	if ( TCGen == 9 ) // TCGEN_VECTOR
+	if ( TCGen == 7 ) // TCGEN_VECTOR
 		tex = vec2(dot(position, TCGenVector0), dot(position, TCGenVector1));
 
 	return tex;

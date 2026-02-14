@@ -1290,8 +1290,8 @@ static void vk_compute_deform( void ) {
 				info->vector[1] = 0.0f;
 				info->vector[2] = 0.0f;
 
-				//if ( ds->bulgeSpeed == 0.0f && ds->bulgeWidth == 0.0f )
-				//	type = DEFORM_BULGE_UNIFORM;
+				if ( ds->bulgeSpeed == 0.0f && ds->bulgeWidth == 0.0f )
+					type = DEFORM_BULGE_UNIFORM;
 
 				break;
 			case DEFORM_MOVE:

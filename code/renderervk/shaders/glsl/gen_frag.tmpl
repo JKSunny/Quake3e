@@ -65,11 +65,6 @@ layout(set = 0, binding = 0) uniform UBO {
 		int		numTexMods;
 	};
 
-	struct vkDisintegration_t {
-		vec3	origin;
-		float	threshold;
-	};
-
 	struct vkDeform_t {
 		float	base;
 		float	amplitude;
@@ -83,6 +78,8 @@ layout(set = 0, binding = 0) uniform UBO {
 		int		func;
 	};
 
+#if 0
+	// light ubo is not implemented
 	struct vkUniformLightEntry_t {
 		vec4	origin;
 		vec3	color;
@@ -101,6 +98,7 @@ layout(set = 0, binding = 0) uniform UBO {
 			vec4 item;
 		#endif
 	};
+#endif
 
 	layout(set = 0, binding = 2) uniform Entity {
 		vec4 u_ambientLight;
@@ -112,7 +110,6 @@ layout(set = 0, binding = 0) uniform UBO {
 
 	layout(set = 0, binding = 3) uniform Global {
 		vkBundle_t			u_bundle[3];
-		vkDisintegration_t	u_disintegration;
 		vkDeform_t			u_deform;
 		float				u_portalRange;
 		vec4				u_SpecularScale;	
