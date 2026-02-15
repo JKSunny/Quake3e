@@ -1481,7 +1481,7 @@ void RB_SurfaceVBOMDVMesh( srfVBOMDVMesh_t *surf )
 		return;
 
 	RB_EndSurface();
-	RB_BeginSurface( tess.shader, tess.fogNum, 0 );
+	RB_BeginSurface( tess.shader, tess.fogNum );
 
 	tess.surfType = surf->surfaceType;
 	tess.vbo_model = surf->vbo;
