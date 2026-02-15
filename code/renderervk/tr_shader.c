@@ -4008,14 +4008,11 @@ static shader_t *FinishShader( void ) {
 #endif
 				}
 
+				pStage->vk_light_flags = def.vk_light_flags;
 				pStage->vk_pbr_flags = def.vk_pbr_flags;
 
 				// want to get rid of this
 				shader.hasPBR = (qboolean)(def.vk_pbr_flags || def.vk_light_flags);
-
-				// move this to ubo ..
-				Vector4Copy( pStage->specularScale, def.specularScale );
-				Vector4Copy( pStage->normalScale, def.normalScale );
 			}
 
 			Vk_Shader_Type	stype;

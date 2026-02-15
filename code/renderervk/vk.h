@@ -206,11 +206,9 @@ typedef struct {
 #ifdef USE_VK_PBR
 	qboolean				vbo_mdv;
 
-	int						vk_light_flags;
+	uint32_t				vk_light_flags;
 	int						lightmap_stage;
 	uint32_t				vk_pbr_flags;
-	vec4_t					specularScale;
-	vec4_t					normalScale;
 #endif
 	int acff; // none, rgb, rgba, alpha
 	struct {

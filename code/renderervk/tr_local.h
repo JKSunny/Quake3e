@@ -446,6 +446,7 @@ typedef struct {
 	uint32_t		vk_pipeline_df; // depthFragment
 	uint32_t		vk_mirror_pipeline_df;
 #ifdef USE_VK_PBR
+	uint32_t		vk_light_flags;
 	uint32_t		vk_pbr_flags;
 	image_t			*normalMap;
 	image_t			*physicalMap;

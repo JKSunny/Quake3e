@@ -650,7 +650,16 @@ void R_ComputeColors( const int b, color4ub_t *dest, const shaderStage_t *pStage
 			Com_Memset( dest, tr.identityLightByte, tess.numVertexes * 4 );
 			break;
 		case CGEN_LIGHTING_DIFFUSE:
-			RB_CalcDiffuseColor( ( unsigned char * ) dest );
+#ifdef USE_VK_PBR
+			// non-vbo vector light surfaces apply diffuse shading twice
+			// upload idenity color instead
+			// concerning is that ambientLight and directedLight are only uploaded for entities, 
+			// (bad) I will just 'assume'; vector == entity. for now ..
+			if ( pStage->vk_light_flags & LIGHTDEF_USE_LIGHT_VECTOR )
+				Com_Memset( dest, 0xff, tess.numVertexes * 4 );
+			else
+#endif
+				RB_CalcDiffuseColor( ( unsigned char * ) dest );
 			break;
 		case CGEN_EXACT_VERTEX:
 			Com_Memcpy( dest, tess.vertexColors, tess.numVertexes * sizeof( tess.vertexColors[0] ) );
