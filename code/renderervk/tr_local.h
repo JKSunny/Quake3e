@@ -1151,7 +1151,7 @@ typedef enum {
 	MDV_CURRENT_FRAME,
 	MDV_PREVIOUS_FRAME,
 	MDV_FRAME_LERP,
-} modtype_t;
+} mdv_lerp_frame_t;
 
 typedef struct srfVBOMDVMesh_s
 {
