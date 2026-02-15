@@ -1569,11 +1569,11 @@ void RB_SurfaceVBOMDVMesh( srfVBOMDVMesh_t *surf )
 		tess.multiDrawPrimitives++;
 	}
 #else
-	GLvoid *indexOffset;
-	indexOffset = BUFFER_OFFSET( surf->indexOffset );
+	//GLvoid *indexOffset;
+	//indexOffset = BUFFER_OFFSET( surf->indexOffset );
 
 	tess.vbo_mdv_surf[MDV_CURRENT_FRAME].num_indexes = surf->numIndexes;
-	tess.vbo_mdv_surf[MDV_CURRENT_FRAME].index_offset = (glIndex_t *)indexOffset;
+	tess.vbo_mdv_surf[MDV_CURRENT_FRAME].index_offset = surf->indexOffset;
 #endif
 
 	if (surf->mdvModel->numFrames > 1 ) {

@@ -1904,8 +1904,8 @@ typedef struct shaderCommands_s
 #ifdef USE_VBO_MDV
 	struct {
 		#ifndef USE_VBO_MDV_INDIRECT
-		GLsizei		num_indexes;
-		glIndex_t	index_offset;
+		uint32_t	num_indexes;	// only MDV_CURRENT_FRAME is used
+		uint32_t	index_offset;
 		#endif
 		uint32_t	frame_offset;
 	} vbo_mdv_surf[MDV_FRAME_LERP];
