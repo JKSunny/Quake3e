@@ -44,6 +44,62 @@ layout(set = 0, binding = 0) uniform UBO {
 #endif
 
 #if defined(PER_PIXEL_LIGHTING) || defined(USE_LIGHT_VECTOR)
+	struct tcMod_t {
+		vec4	matrix;
+		vec4	offTurb;
+	};
+
+	struct tcGen_t {
+		vec3	vector0;
+		vec3	vector1;
+		int		type;
+	};
+
+	struct vkBundle_t {
+		vec4	baseColor;
+		vec4	vertColor;
+		tcMod_t	tcMod;
+		tcGen_t	tcGen;
+		int		rgbGen;
+		int		alphaGen;
+		int		numTexMods;
+	};
+
+	struct vkDeform_t {
+		float	base;
+		float	amplitude;
+		float	phase;
+		float	frequency;
+
+		vec3	vector;
+		float	time;
+
+		int		type;
+		int		func;
+	};
+
+#if 0
+	// light ubo is not implemented
+	struct vkUniformLightEntry_t {
+		vec4	origin;
+		vec3	color;
+		float	radius;
+	};
+
+	struct vkUniformLight_t {
+		uint	num_lights;
+		vkUniformLightEntry_t	light[64];
+	};
+
+	layout(set = 0, binding = 2) uniform Light {
+		#ifdef VK_DLIGHT_GPU
+			vkUniformLight_t u_lights;
+		#else
+			vec4 item;
+		#endif
+	};
+#endif
+
 	layout(set = 0, binding = 2) uniform Entity {
 		vec4 u_ambientLight;
 		vec4 u_directedLight;
@@ -53,6 +109,9 @@ layout(set = 0, binding = 0) uniform UBO {
 	};
 
 	layout(set = 0, binding = 3) uniform Global {
+		vkBundle_t			u_bundle[3];
+		vkDeform_t			u_deform;
+		float				u_portalRange;
 		vec4				u_SpecularScale;	
 		vec4				u_NormalScale;	
 	};	
@@ -727,7 +786,7 @@ void main() {
 			attenuation = 1.0;
 		#elif defined(USE_LIGHT_VECTOR)
 			lightColor = u_directedLight.rgb;
-			ambientColor = u_ambientLight.rgb;
+			ambientColor = u_ambientLight.rgb * base.rgb;
 			diffuse = base;
 			attenuation = 1.0;
 		#elif defined(USE_LIGHT_VERTEX)

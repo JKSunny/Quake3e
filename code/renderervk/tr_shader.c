@@ -2459,6 +2459,22 @@ static const collapse_t collapse[] = {
 };
 
 
+#ifdef USE_VK_PBR
+static int vk_get_light_mode_collapse( shaderStage_t *stage ) 
+{
+	if ( stage->bundle[0].rgbGen == CGEN_LIGHTING_DIFFUSE ) {
+		return LIGHTDEF_USE_LIGHT_VECTOR;
+	}
+
+	if ( stage->bundle[0].rgbGen == CGEN_VERTEX || 
+		 stage->bundle[0].rgbGen == CGEN_EXACT_VERTEX ) {
+		return LIGHTDEF_USE_LIGHT_VERTEX;
+	}
+
+	return 0;
+}
+#endif
+
 /*
 ================
 CollapseMultitexture
@@ -2488,6 +2504,12 @@ static int CollapseMultitexture( unsigned int st0bits, shaderStage_t *st0, shade
 	if ( st0->depthFragment || (st0->stateBits & GLS_ATEST_BITS) ) {
 		return 0;
 	}
+
+#ifdef USE_VK_PBR
+	// dont collapse non matching light types stages
+	if ( vk_get_light_mode_collapse( st0 ) != vk_get_light_mode_collapse( st1 ) )
+		return 0;
+#endif
 
 #ifndef USE_VULKAN
 	// on voodoo2, don't combine different tmus
