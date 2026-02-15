@@ -1599,6 +1599,7 @@ extern cvar_t	*r_device;
 extern cvar_t	*r_vbo;
 #endif
 #ifdef USE_VK_PBR
+extern cvar_t	*r_vbo_models;
 extern cvar_t	*r_pbr;
 extern cvar_t	*r_normalMapping;
 extern cvar_t	*r_specularMapping;

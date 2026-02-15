@@ -84,6 +84,7 @@ cvar_t	*r_device;
 cvar_t	*r_vbo;
 #endif
 #ifdef USE_VK_PBR
+cvar_t	*r_vbo_models;
 cvar_t	*r_pbr;
 cvar_t  *r_normalMapping;
 cvar_t  *r_specularMapping;
@@ -1565,6 +1566,10 @@ static void R_Register( void )
 	ri.Cvar_SetDescription( r_vbo, "Use Vertex Buffer Objects to cache static map geometry, may improve FPS on modern GPUs, increases hunk memory usage by 15-30MB (map-dependent)." );
 #endif
 #if defined (USE_VULKAN) && defined (USE_VK_PBR)
+#ifdef USE_VBO
+	r_vbo_models = ri.Cvar_Get( "r_vbo_models", "1", CVAR_ARCHIVE | CVAR_LATCH );
+	ri.Cvar_SetDescription( r_vbo_models, "Beta feature: Cache MD3 model surfaces. Might be unstable/cause artifacts - IQM/MDR not supported yet." );
+#endif
 	r_pbr = ri.Cvar_Get("r_pbr", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_SetDescription( r_pbr, "Enables Physically Based Rendering. \nRequires " S_COLOR_CYAN "\\r_fbo 1 \n" S_COLOR_GREEN "Advised " S_COLOR_CYAN "\\r_vbo 1 " S_COLOR_GREEN "for static world geometry " S_COLOR_WHITE "*optional" );
 

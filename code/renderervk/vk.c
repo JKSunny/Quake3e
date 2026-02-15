@@ -4721,7 +4721,8 @@ void vk_initialize( void )
 			vk.specularMappingActive = qtrue;
 
 #ifdef USE_VBO_MDV
-		vk.vboMdvActive = qtrue;
+		if ( r_vbo_models->integer )
+			vk.vboMdvActive = qtrue;
 #endif
 
 #ifdef VK_CUBEMAP

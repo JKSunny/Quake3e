@@ -552,6 +552,9 @@ void R_BuildMD3( model_t *mod, mdvModel_t *mdvModel )
 	mdvModel->numVBOSurfaces = mdvModel->numSurfaces;
 	mdvModel->vboSurfaces = (srfVBOMDVMesh_t *)ri.Hunk_Alloc(sizeof(*mdvModel->vboSurfaces) * mdvModel->numSurfaces, h_low);
 
+	if ( !vk.vboMdvActive )
+		return;
+
 	if ( !mdvModel->numSurfaces )
 		return;
 
