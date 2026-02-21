@@ -1559,6 +1559,8 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 
 			def.vbo_mdv = is_mdv_vbo;
 			pipeline = vk_find_pipeline_ext( 0, &def, qfalse );
+
+			pushUniform = qtrue;
 		}
 
 		if ( !is_pbr_surface && pStage->vk_pbr_flags ) {

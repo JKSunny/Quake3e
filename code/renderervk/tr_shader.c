@@ -3989,6 +3989,10 @@ static shader_t *FinishShader( void ) {
 
 				def.vk_pbr_flags = pStage->vk_pbr_flags;
 
+				// vector/entity requires normals for fastlight to work in gen_vert glsl
+				if ( vk.useFastLight && def.vk_light_flags & LIGHTDEF_USE_LIGHT_VECTOR )
+					pStage->tessFlags |= TESS_NNN;
+
 				if ( def.vk_light_flags && !vk.useFastLight ) 
 				{
 					pStage->tessFlags |= TESS_TANGENT | TESS_NNN;

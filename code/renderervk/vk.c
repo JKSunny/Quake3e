@@ -4710,7 +4710,12 @@ void vk_initialize( void )
 	vk.maxBoundDescriptorSets = props.limits.maxBoundDescriptorSets;
 
 #ifdef USE_VK_PBR
-	if( vk.fboActive && r_pbr->integer && vk.maxBoundDescriptorSets >= 10 )
+#ifdef USE_VBO_MDV
+		if ( r_vbo_models->integer )
+			vk.vboMdvActive = qtrue;
+#endif
+
+	if( vk.fboActive && r_pbr->integer && vk.maxBoundDescriptorSets >= VK_DESC_COUNT )
 	{
 		vk.pbrActive = qtrue;
 
@@ -4719,11 +4724,6 @@ void vk_initialize( void )
 
 		if ( r_specularMapping->integer )
 			vk.specularMappingActive = qtrue;
-
-#ifdef USE_VBO_MDV
-		if ( r_vbo_models->integer )
-			vk.vboMdvActive = qtrue;
-#endif
 
 #ifdef VK_CUBEMAP
 		if ( r_cubeMapping->integer )
